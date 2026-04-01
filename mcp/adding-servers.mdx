@@ -1,0 +1,285 @@
+---
+title: "Adding MCP servers"
+description: "Add local and remote MCP servers to Claude Code using the CLI or config files."
+---
+
+You can add MCP servers in two ways: using the `claude mcp add` CLI command, or by editing config files directly. The CLI is the recommended approach — it validates your config and writes to the correct file automatically.
+
+## Using the CLI
+
+The `mcp add` subcommand is registered in `commands/mcp/addCommand.ts` and has this signature:
+
+```bash
+claude mcp add [options] <name> <command-or-url> [args...]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-s, --scope <scope>` | Config scope: `local` (default), `user`, or `project` |
+| `-t, --transport <transport>` | Transport type: `stdio` (default), `sse`, or `http` |
+| `-e, --env <env...>` | Environment variables, e.g. `-e KEY=value` |
+| `-H, --header <header...>` | HTTP/SSE headers, e.g. `-H "Authorization: Bearer ..."` |
+| `--client-id <clientId>` | OAuth client ID for HTTP/SSE servers |
+| `--client-secret` | Prompt for OAuth client secret interactively |
+| `--callback-port <port>` | Fixed port for OAuth callback |
+
+Server names must match `[a-zA-Z0-9_-]` — only letters, numbers, hyphens, and underscores are allowed (`addMcpConfig` in `services/mcp/config.ts:630`).
+
+## Adding a stdio server
+
+Stdio servers are local subprocesses. Claude Code spawns the process and communicates over stdin/stdout. This is the default transport when `--transport` is omitted.
+
+```bash
+# Add a server using npx
+claude mcp add my-server -- npx -y my-mcp-server
+
+# Add a server with environment variables
+claude mcp add -e API_KEY=abc123 -e BASE_URL=https://api.example.com my-server -- npx my-mcp-server
+
+# Add a server with subprocess flags (use -- to separate server args)
+claude mcp add my-server -- my-command --some-flag arg1
+```
+
+<Warning>
+  If you pass a URL-looking string as the command without `--transport`, Claude Code prints a warning and treats it as a subprocess command. Always use `--transport http` or `--transport sse` for remote servers.
+</Warning>
+
+The resulting config entry (written to the target scope's file) looks like this:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "my-mcp-server"],
+      "env": {
+        "API_KEY": "abc123",
+        "BASE_URL": "https://api.example.com"
+      }
+    }
+  }
+}
+```
+
+## Adding an HTTP server
+
+Use `--transport http` for servers that implement the Streamable HTTP MCP transport.
+
+```bash
+# Add a plain HTTP server
+claude mcp add --transport http sentry https://mcp.sentry.dev/mcp
+
+# Add an HTTP server with a custom header
+claude mcp add --transport http corridor \
+  https://app.corridor.dev/api/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"
+```
+
+The resulting config:
+
+```json
+{
+  "mcpServers": {
+    "corridor": {
+      "type": "http",
+      "url": "https://app.corridor.dev/api/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+## Adding an SSE server
+
+Use `--transport sse` for servers that use the Server-Sent Events transport.
+
+```bash
+claude mcp add --transport sse my-sse-server https://example.com/sse
+```
+
+The resulting config:
+
+```json
+{
+  "mcpServers": {
+    "my-sse-server": {
+      "type": "sse",
+      "url": "https://example.com/sse"
+    }
+  }
+}
+```
+
+## OAuth for remote servers
+
+HTTP and SSE servers can use OAuth for authentication. Pass `--client-id` and optionally `--client-secret` when adding the server:
+
+```bash
+claude mcp add --transport http \
+  --client-id my-oauth-client-id \
+  --client-secret \
+  --callback-port 8085 \
+  my-oauth-server https://api.example.com/mcp
+```
+
+`--client-secret` prompts you to enter the secret interactively (or reads it from the `MCP_CLIENT_SECRET` environment variable). The secret is stored in the system keychain, not in the config file.
+
+The OAuth config is stored alongside the server config:
+
+```json
+{
+  "mcpServers": {
+    "my-oauth-server": {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "oauth": {
+        "clientId": "my-oauth-client-id",
+        "callbackPort": 8085
+      }
+    }
+  }
+}
+```
+
+<Note>
+  `--client-id`, `--client-secret`, and `--callback-port` are silently ignored for stdio servers. A warning is printed if you pass them with a stdio transport.
+</Note>
+
+## Config file format
+
+If you prefer to edit config files directly, use this JSON structure. The schema is defined by `McpJsonConfigSchema` in `services/mcp/types.ts:171`:
+
+```json
+{
+  "mcpServers": {
+    "<server-name>": { /* McpServerConfig */ }
+  }
+}
+```
+
+### Stdio server fields
+
+Defined by `McpStdioServerConfigSchema` in `services/mcp/types.ts:28`:
+
+```json
+{
+  "type": "stdio",
+  "command": "npx",
+  "args": ["-y", "@company/my-mcp-server"],
+  "env": {
+    "SOME_KEY": "some-value"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | No | `"stdio"` — omitting this field defaults to stdio |
+| `command` | Yes | The executable to run |
+| `args` | No | Array of arguments passed to the command |
+| `env` | No | Environment variables injected into the subprocess |
+
+### HTTP server fields
+
+Defined by `McpHTTPServerConfigSchema` in `services/mcp/types.ts:89`:
+
+```json
+{
+  "type": "http",
+  "url": "https://api.example.com/mcp",
+  "headers": {
+    "X-Api-Key": "your-key"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | Must be `"http"` |
+| `url` | Yes | Full URL of the MCP endpoint |
+| `headers` | No | Static HTTP headers sent with every request |
+| `oauth` | No | OAuth configuration object |
+
+### SSE server fields
+
+Defined by `McpSSEServerConfigSchema` in `services/mcp/types.ts:58`:
+
+```json
+{
+  "type": "sse",
+  "url": "https://example.com/sse",
+  "headers": {
+    "Authorization": "Bearer your-token"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | Must be `"sse"` |
+| `url` | Yes | Full URL of the SSE endpoint |
+| `headers` | No | Static HTTP headers sent with every request |
+| `oauth` | No | OAuth configuration object |
+
+## Environment variable expansion
+
+String values in your config can reference environment variables using `$VAR` or `${VAR}` syntax. Expansion is handled at startup by `expandEnvVarsInString` in `services/mcp/envExpansion.ts`. This applies to `command`, `args`, `env` values, and `url`/`headers` for remote servers.
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "http",
+      "url": "https://${MY_DOMAIN}/mcp",
+      "headers": {
+        "Authorization": "Bearer $MY_API_TOKEN"
+      }
+    }
+  }
+}
+```
+
+If a referenced variable is not set in the environment, Claude Code logs a warning with the missing variable names.
+
+## Configuration scopes and file locations
+
+<Tabs>
+  <Tab title="local (default)">
+    Stored in the project-local Claude config file. This file is gitignored and only applies to the current project on your machine. Use this for personal API keys or servers you don't want to share.
+
+    ```bash
+    claude mcp add my-server -- npx my-mcp-server
+    # equivalent to:
+    claude mcp add -s local my-server -- npx my-mcp-server
+    ```
+  </Tab>
+  <Tab title="project">
+    Stored in `.mcp.json` at the root of your current working directory. This file should be committed to version control so the whole team gets the same servers.
+
+    ```bash
+    claude mcp add -s project my-server -- npx my-mcp-server
+    ```
+
+    The `.mcp.json` file is written atomically (temp file + rename) to avoid corruption (`writeMcpjsonFile` in `services/mcp/config.ts:88`).
+  </Tab>
+  <Tab title="user">
+    Stored in the global Claude config at `~/.claude/`. Applies to all projects on your machine.
+
+    ```bash
+    claude mcp add -s user my-server -- npx my-mcp-server
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  For servers shared across your team, use `--scope project` and commit `.mcp.json` to your repository. For personal servers with secrets, use `--scope local` (gitignored) or `--scope user`.
+</Tip>
+
+## Enterprise policy
+
+In managed environments, an administrator can configure allowlists and denylists that restrict which MCP servers can be added. If a server is blocked by policy, `claude mcp add` fails with an error message explaining why. Servers can be restricted by name, by command, or by URL pattern. See `isMcpServerAllowedByPolicy` in `services/mcp/config.ts:417` for the full matching logic.

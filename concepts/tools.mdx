@@ -1,0 +1,270 @@
+---
+title: "Tools"
+description: "The built-in tools Claude Code uses to read files, run commands, search codebases, and more."
+---
+
+Claude Code gives the model a set of **tools** — typed functions that it can call to interact with your system. Every tool call is shown in the UI and requires permission before it executes (unless you have configured auto-accept rules). The full tool registry lives in `tools.ts`, and each tool's implementation lives under `tools/<ToolName>/`.
+
+## Core tools
+
+<CardGroup cols={2}>
+  <Card title="Bash" icon="terminal">
+    Execute shell commands with configurable timeout and background-task support.
+  </Card>
+  <Card title="FileRead" icon="file">
+    Read file contents with optional line-range, image, PDF, and notebook support.
+  </Card>
+  <Card title="FileEdit" icon="pencil">
+    Apply exact string replacements to existing files.
+  </Card>
+  <Card title="FileWrite" icon="floppy-disk">
+    Write or overwrite a file on disk.
+  </Card>
+  <Card title="Glob" icon="magnifying-glass">
+    Find files matching a glob pattern, sorted by modification time.
+  </Card>
+  <Card title="Grep" icon="search">
+    Search file contents using regular expressions via ripgrep.
+  </Card>
+  <Card title="WebFetch" icon="globe">
+    Fetch a URL and apply a prompt to the retrieved content.
+  </Card>
+  <Card title="WebSearch" icon="magnifying-glass-plus">
+    Run a web search and return structured results.
+  </Card>
+  <Card title="Agent" icon="robot">
+    Spawn a sub-agent to complete a delegated task.
+  </Card>
+  <Card title="TodoWrite" icon="list-check">
+    Update the session's task checklist.
+  </Card>
+</CardGroup>
+
+---
+
+## Bash
+
+The `Bash` tool runs a shell command and returns its combined stdout/stderr output. The working directory persists between invocations but shell state (variables, aliases) does not — each call starts from the user's login profile.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `command` | `string` | The shell command to run |
+| `timeout` | `number` (ms) | Max wait time; defaults to 2 minutes, max 10 minutes |
+| `description` | `string` | Human-readable label shown in the UI |
+| `run_in_background` | `boolean` | Run the command detached; Claude is notified when it finishes |
+
+<Note>
+Claude Code prefers `FileRead`, `FileEdit`, `Glob`, and `Grep` over equivalent shell commands. When those dedicated tools can accomplish a task, they provide a better user experience and finer-grained permission control.
+</Note>
+
+The Bash tool's system prompt (in `tools/BashTool/prompt.ts`) instructs Claude to:
+
+- Quote paths that contain spaces
+- Use `&&` to chain dependent commands and parallel tool calls for independent ones
+- Avoid `sleep` loops in favour of background tasks or the `Monitor` tool
+- Never skip git hooks (`--no-verify`) unless you explicitly ask
+
+### Sandbox mode
+
+When sandboxing is enabled, Bash commands run inside a restricted environment with configurable filesystem and network allow/deny lists. The sandbox configuration is surfaced in the Bash tool's system prompt so Claude knows which paths and hosts are available without needing to probe them at runtime.
+
+---
+
+## FileRead
+
+`FileRead` reads a file and returns its contents with 1-indexed line numbers. It handles plain text, images (JPEG, PNG, GIF, WebP), PDFs, and Jupyter notebooks natively.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `file_path` | `string` | Absolute or relative path to the file |
+| `offset` | `number` | 1-indexed line number to start reading from |
+| `limit` | `number` | Maximum number of lines to return |
+
+For image files the tool returns a base64-encoded image block. For PDFs it extracts text (with optional page ranges). For `.ipynb` notebooks it maps cells to structured output.
+
+---
+
+## FileEdit
+
+`FileEdit` performs an exact string replacement inside a file. Claude must supply both the literal text to find (`old_string`) and the replacement (`new_string`). The match is case-sensitive and must be unique — if the string appears more than once, Claude must include enough surrounding context to identify the correct occurrence.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `file_path` | `string` | Path to the file to modify |
+| `old_string` | `string` | Exact text to replace |
+| `new_string` | `string` | Replacement text |
+| `replace_all` | `boolean` | Replace every occurrence (default `false`) |
+
+<Warning>
+Claude Code requires that a file has been read with `FileRead` before `FileEdit` is allowed on it. This ensures Claude is working from current on-disk content rather than a stale in-context copy.
+</Warning>
+
+---
+
+## FileWrite
+
+`FileWrite` creates or overwrites a file with the supplied content. Like `FileEdit`, it requires a prior `FileRead` on existing files.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `file_path` | `string` | Path to the file to write |
+| `content` | `string` | Full content to write |
+
+---
+
+## Glob
+
+`Glob` finds files whose paths match a glob pattern. Results are sorted by modification time (most recent first) and capped at 100 files by default. Paths are returned relative to the current working directory to save tokens.
+
+Implemented in `tools/GlobTool/GlobTool.ts` using the internal `utils/glob.ts` utility.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `pattern` | `string` | Glob pattern, e.g. `**/*.ts` |
+| `path` | `string` (optional) | Directory to search in; defaults to cwd |
+
+```
+# Example output
+src/index.ts
+src/utils/file.ts
+tests/file.test.ts
+```
+
+---
+
+## Grep
+
+`Grep` searches file contents using a regular expression. Under the hood it delegates to `ripgrep` (`utils/ripgrep.ts`) for speed.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `pattern` | `string` | Regular expression to search for |
+| `path` | `string` (optional) | File or directory to search |
+| `glob` | `string` (optional) | File filter, e.g. `*.ts` |
+| `output_mode` | `"content" \| "files_with_matches" \| "count"` | What to return; defaults to `files_with_matches` |
+| `-A`, `-B`, `-C` | `number` | Lines of context after/before/around each match (requires `output_mode: "content"`) |
+
+---
+
+## WebFetch
+
+`WebFetch` downloads a URL and applies a prompt to the content before returning the result. Content is converted to Markdown before the prompt is applied, keeping token usage lower than passing raw HTML.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `url` | `string` | URL to fetch (must be a valid URL) |
+| `prompt` | `string` | Instruction to apply to the fetched content |
+
+The tool checks permission rules per-hostname. Pre-approved hosts (defined in `tools/WebFetchTool/preapproved.ts`) do not require an interactive approval step.
+
+---
+
+## WebSearch
+
+`WebSearch` runs a web search and returns structured results including titles, URLs, and snippets. It is used when the information needed is not on disk and cannot be fetched from a known URL.
+
+---
+
+## Agent
+
+The `Agent` tool lets Claude spawn a sub-agent — a full nested Claude Code instance — to complete a delegated task. Sub-agents have their own tool pool, permission context, and conversation history. They report back a structured result when they finish.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `description` | `string` | Human-readable label for the task |
+| `prompt` | `string` | Full instructions for the sub-agent |
+| `subagent_type` | `string` (optional) | Named agent definition from `.claude/agents/` |
+
+Sub-agents are registered and tracked via `tasks/LocalAgentTask/`. In agent-swarms mode (`isAgentSwarmsEnabled()`), multiple agents can be coordinated simultaneously across terminal panes or tmux windows.
+
+<Tip>
+The Agent tool is the mechanism behind Claude Code's multi-step task automation. When you ask Claude to "explore the codebase and then implement a feature," it may spawn a dedicated explore agent first and then use the results to guide implementation.
+</Tip>
+
+---
+
+## TodoWrite
+
+`TodoWrite` maintains a session-scoped task list that Claude uses to track multi-step work. The todo list is visible in the UI and survives within the session.
+
+**Key parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `todos` | `TodoItem[]` | Complete replacement list of tasks |
+
+Each `TodoItem` has a `content` string and a `status` of `pending`, `in_progress`, or `completed`. When all items are set to `completed`, the list is cleared automatically.
+
+The tool never requires a permission prompt — it only modifies in-memory state (`TodoWriteTool.ts:58–60`).
+
+---
+
+## Additional tools
+
+<AccordionGroup>
+  <Accordion title="AskUserQuestion">
+    Pause execution and ask the user a clarifying question. Supports multiple-choice options. Claude Code uses this instead of making assumptions when a decision requires human input.
+  </Accordion>
+  <Accordion title="NotebookEdit">
+    Edit cells in a Jupyter notebook (`.ipynb`). Supports inserting, replacing, and deleting cells with optional cell-type specification.
+  </Accordion>
+  <Accordion title="ListMcpResources / ReadMcpResource">
+    Enumerate and read resources exposed by connected MCP servers. These tools are added to the pool automatically when MCP servers are configured.
+  </Accordion>
+  <Accordion title="EnterPlanMode / ExitPlanMode">
+    Switch the session into Plan mode, where Claude outlines a plan and waits for approval before executing any changes.
+  </Accordion>
+  <Accordion title="TaskOutputTool">
+    Write structured output from a sub-agent back to the parent session. Used by agents spawned via the `Agent` tool to return their results.
+  </Accordion>
+  <Accordion title="ToolSearch">
+    When the total number of tools exceeds a threshold (many MCP servers connected), `ToolSearch` lets Claude search for the right tool by description rather than scanning every schema in the system prompt.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Tool assembly
+
+The active tool pool for any given request is assembled by `assembleToolPool()` in `tools.ts`:
+
+1. Built-in tools are collected from `getAllBaseTools()`.
+2. Tools blocked by deny rules are filtered out via `filterToolsByDenyRules()`.
+3. MCP tools are appended and deduplicated by name (built-in tools take precedence on name conflicts).
+4. Both partitions are sorted alphabetically for prompt-cache stability.
+
+```typescript
+// tools.ts:345–367
+export function assembleToolPool(
+  permissionContext: ToolPermissionContext,
+  mcpTools: Tools,
+): Tools {
+  const builtInTools = getTools(permissionContext)
+  const allowedMcpTools = filterToolsByDenyRules(mcpTools, permissionContext)
+  const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
+  return uniqBy(
+    [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
+    'name',
+  )
+}
+```
+
+## Simple mode
+
+Setting `CLAUDE_CODE_SIMPLE=1` restricts the tool pool to `Bash`, `FileRead`, and `FileEdit`. This is useful for constrained environments or when you want to minimise the attack surface of an automated pipeline.

@@ -1,0 +1,578 @@
+---
+title: "CLI Flags"
+description: "All flags and options accepted by the `claude` command."
+---
+
+Run `claude [prompt]` to start an interactive session, or combine flags to control behavior. Use `-p` / `--print` for non-interactive (pipe-friendly) output.
+
+```bash
+claude [prompt] [flags]
+```
+
+<Note>
+  Flags marked **print-only** only take effect when `--print` (`-p`) is also passed. Using them in interactive mode has no effect.
+</Note>
+
+## General
+
+<AccordionGroup>
+  <Accordion title="-h, --help">
+    **Type:** boolean
+
+    Display help for the command and exit.
+
+    ```bash
+    claude --help
+    ```
+  </Accordion>
+
+  <Accordion title="-p, --print">
+    **Type:** boolean
+
+    Print the response to stdout and exit instead of starting an interactive session. Useful for pipes and scripts.
+
+    ```bash
+    claude -p "Summarize this file" < README.md
+    ```
+
+    <Warning>
+      The workspace trust dialog is skipped in `--print` mode. Only use this flag in directories you trust.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="--verbose">
+    **Type:** boolean
+
+    Override the verbose mode setting from config. Enables extra output including tool inputs and outputs.
+
+    ```bash
+    claude --verbose -p "List files in src/"
+    ```
+  </Accordion>
+
+  <Accordion title="-d, --debug [filter]">
+    **Type:** boolean or string
+
+    Enable debug logging. Pass an optional comma-separated filter to restrict which categories are logged.
+
+    ```bash
+    # All debug output
+    claude --debug
+
+    # Only API and hooks categories
+    claude --debug "api,hooks"
+
+    # Everything except 1p and file categories
+    claude --debug "!1p,!file"
+    ```
+  </Accordion>
+
+  <Accordion title="--debug-file <path>">
+    **Type:** string
+
+    Write debug logs to a file instead of (or in addition to) the terminal. Implicitly enables debug mode.
+
+    ```bash
+    claude --debug-file /tmp/claude-debug.log
+    ```
+  </Accordion>
+
+  <Accordion title="--bare">
+    **Type:** boolean
+
+    Minimal startup mode. Disables hooks, LSP, plugin sync, commit attribution, auto-memory, background prefetches, keychain reads, and `CLAUDE.md` auto-discovery. Sets `CLAUDE_CODE_SIMPLE=1`.
+
+    In `--bare` mode:
+    - Anthropic auth is strictly `ANTHROPIC_API_KEY` or `apiKeyHelper` via `--settings`. OAuth and keychain are never read.
+    - Third-party providers (Bedrock, Vertex, Foundry) use their own credentials as normal.
+    - Skills still resolve via `/skill-name`.
+
+    Provide context explicitly using: `--system-prompt`, `--append-system-prompt`, `--add-dir`, `--mcp-config`, `--settings`, `--agents`, `--plugin-dir`.
+
+    ```bash
+    claude --bare --settings settings.json -p "Review this code"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Session control
+
+<AccordionGroup>
+  <Accordion title="-c, --continue">
+    **Type:** boolean
+
+    Continue the most recent conversation in the current working directory.
+
+    ```bash
+    claude -c
+    claude -c -p "Keep going"
+    ```
+  </Accordion>
+
+  <Accordion title="-r, --resume [value]">
+    **Type:** boolean or string
+
+    Resume a conversation. Pass a session UUID to jump directly to that session, a search term to pre-filter the picker, or omit the value to open the interactive picker.
+
+    ```bash
+    # Open picker
+    claude --resume
+
+    # Filter picker
+    claude -r "my-feature"
+
+    # Jump directly to session
+    claude -r 550e8400-e29b-41d4-a716-446655440000
+    ```
+  </Accordion>
+
+  <Accordion title="--fork-session">
+    **Type:** boolean
+
+    When used with `--resume` or `--continue`, creates a new forked session from that point instead of continuing the original. Combine with `--session-id` to specify the ID of the new fork.
+
+    ```bash
+    claude --resume --fork-session
+    ```
+  </Accordion>
+
+  <Accordion title="--from-pr [value]">
+    **Type:** boolean or string
+
+    Resume a session linked to a GitHub PR. Pass a PR number or URL to jump directly, or omit to open the interactive picker.
+
+    ```bash
+    claude --from-pr 123
+    claude --from-pr https://github.com/owner/repo/pull/123
+    ```
+  </Accordion>
+
+  <Accordion title="--session-id <uuid>">
+    **Type:** string
+
+    Assign a specific UUID to the new session. Must be a valid UUID and must not already be in use.
+
+    ```bash
+    claude --session-id 550e8400-e29b-41d4-a716-446655440000
+    ```
+
+    When used with `--resume` or `--continue`, requires `--fork-session` to be present.
+  </Accordion>
+
+  <Accordion title="-n, --name <name>">
+    **Type:** string
+
+    Set a display name for the session. Shown in `/resume` and in the terminal title bar.
+
+    ```bash
+    claude -n "refactor-auth-module"
+    ```
+  </Accordion>
+
+  <Accordion title="--no-session-persistence">
+    **Type:** boolean (print-only)
+
+    Disable session persistence. The session will not be saved to disk and cannot be resumed.
+
+    ```bash
+    claude -p --no-session-persistence "One-shot task"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Model and compute
+
+<AccordionGroup>
+  <Accordion title="--model <model>">
+    **Type:** string
+
+    Set the model for the session. Accepts an alias for the latest model version (`sonnet`, `opus`) or a full model name (`claude-sonnet-4-6`).
+
+    ```bash
+    claude --model sonnet
+    claude --model claude-opus-4-6
+    ```
+  </Accordion>
+
+  <Accordion title="--effort <level>">
+    **Type:** string — one of `low`, `medium`, `high`, `max`
+
+    Set the reasoning effort level for the session.
+
+    ```bash
+    claude --effort high -p "Analyze this architecture"
+    ```
+  </Accordion>
+
+  <Accordion title="--agent <agent>">
+    **Type:** string
+
+    Override the `agent` setting for this session. Selects which agent definition to use.
+
+    ```bash
+    claude --agent reviewer
+    ```
+  </Accordion>
+
+  <Accordion title="--agents <json>">
+    **Type:** string (JSON)
+
+    Inline agent definitions as a JSON object. Each key is the agent name; the value is an object with `description` and `prompt`.
+
+    ```bash
+    claude --agents '{"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}'
+    ```
+  </Accordion>
+
+  <Accordion title="--fallback-model <model>">
+    **Type:** string (print-only)
+
+    Enable automatic fallback to the specified model when the primary model is overloaded.
+
+    ```bash
+    claude --model opus --fallback-model sonnet -p "Analyze this"
+    ```
+  </Accordion>
+
+  <Accordion title="--betas <betas...>">
+    **Type:** string list (API key users only)
+
+    Pass beta feature headers to include in API requests.
+
+    ```bash
+    claude --betas interleaved-thinking-2025-05-14
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Output format
+
+<AccordionGroup>
+  <Accordion title="--output-format <format>">
+    **Type:** string — one of `text`, `json`, `stream-json` (print-only)
+
+    Control the output format when running in `--print` mode.
+
+    | Value | Description |
+    |---|---|
+    | `text` | Plain text (default) |
+    | `json` | Single JSON object with the complete result |
+    | `stream-json` | Newline-delimited JSON events streamed in real time |
+
+    ```bash
+    claude -p --output-format json "List the top 3 issues"
+    claude -p --output-format stream-json "Implement the feature"
+    ```
+  </Accordion>
+
+  <Accordion title="--input-format <format>">
+    **Type:** string — one of `text`, `stream-json` (print-only)
+
+    Control how stdin is interpreted when running in `--print` mode.
+
+    | Value | Description |
+    |---|---|
+    | `text` | Plain text (default) |
+    | `stream-json` | Newline-delimited JSON event stream |
+
+    ```bash
+    cat events.ndjson | claude -p --input-format stream-json --output-format stream-json ""
+    ```
+  </Accordion>
+
+  <Accordion title="--include-hook-events">
+    **Type:** boolean (requires `--output-format=stream-json`)
+
+    Include all hook lifecycle events in the output stream. Without this flag only `SessionStart` and `Setup` events are emitted.
+
+    ```bash
+    claude -p --output-format stream-json --include-hook-events "Run tests"
+    ```
+  </Accordion>
+
+  <Accordion title="--json-schema <schema>">
+    **Type:** string (JSON Schema)
+
+    Provide a JSON Schema for structured output validation. Claude will produce output that conforms to the schema.
+
+    ```bash
+    claude -p --json-schema '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}' \
+      "Extract the author name from this file"
+    ```
+  </Accordion>
+
+  <Accordion title="--max-turns <n>">
+    **Type:** integer (print-only)
+
+    Limit the number of agentic turns before stopping. Useful to cap costs in automated pipelines.
+
+    ```bash
+    claude -p --max-turns 5 "Fix the failing tests"
+    ```
+  </Accordion>
+
+  <Accordion title="--max-budget-usd <amount>">
+    **Type:** number — must be greater than 0 (print-only)
+
+    Set a hard budget cap in USD. Claude stops before exceeding this amount.
+
+    ```bash
+    claude -p --max-budget-usd 0.50 "Refactor this module"
+    ```
+  </Accordion>
+
+  <Accordion title="--replay-user-messages">
+    **Type:** boolean (requires `--input-format=stream-json` and `--output-format=stream-json`)
+
+    Re-emit user messages from stdin back on stdout for acknowledgment.
+
+    ```bash
+    claude -p --input-format stream-json --output-format stream-json --replay-user-messages ""
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Tools and permissions
+
+<AccordionGroup>
+  <Accordion title="--allowed-tools <tools...>">
+    **Aliases:** `--allowedTools`
+
+    **Type:** string list
+
+    Comma or space-separated list of tool names to allow. Supports glob-style patterns.
+
+    ```bash
+    claude --allowed-tools "Bash(git:*) Edit Read"
+    claude --allowed-tools Bash Edit
+    ```
+  </Accordion>
+
+  <Accordion title="--disallowed-tools <tools...>">
+    **Aliases:** `--disallowedTools`
+
+    **Type:** string list
+
+    Comma or space-separated list of tool names to deny.
+
+    ```bash
+    claude --disallowed-tools "Bash(rm:*)"
+    ```
+  </Accordion>
+
+  <Accordion title="--tools <tools...>">
+    **Type:** string list
+
+    Specify the exact set of built-in tools to make available. Use `""` to disable all tools, `"default"` for all tools, or list tool names explicitly.
+
+    ```bash
+    # No tools
+    claude --tools ""
+
+    # All built-in tools
+    claude --tools default
+
+    # Specific tools only
+    claude --tools "Bash,Edit,Read"
+    ```
+  </Accordion>
+
+  <Accordion title="--permission-mode <mode>">
+    **Type:** string
+
+    Set the permission mode for the session. Controls how Claude handles tool approval prompts.
+
+    ```bash
+    claude --permission-mode auto
+    ```
+
+    <Tip>
+      Run `claude --help` to see the current list of valid permission mode values.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="--dangerously-skip-permissions">
+    **Type:** boolean
+
+    Skip all permission prompts. All tool calls are approved automatically.
+
+    <Warning>
+      Only use this in fully sandboxed or trusted automated environments. This flag removes all safety guardrails.
+    </Warning>
+
+    ```bash
+    claude -p --dangerously-skip-permissions "Run the full test suite"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## MCP configuration
+
+<AccordionGroup>
+  <Accordion title="--mcp-config <configs...>">
+    **Type:** string list
+
+    Load MCP servers from one or more JSON configuration files or inline JSON strings (space-separated).
+
+    ```bash
+    # From a file
+    claude --mcp-config ./mcp-servers.json
+
+    # Multiple files
+    claude --mcp-config ./servers-a.json ./servers-b.json
+    ```
+  </Accordion>
+
+  <Accordion title="--strict-mcp-config">
+    **Type:** boolean
+
+    Only use MCP servers defined via `--mcp-config`. Ignores all project-level and user-level MCP configurations.
+
+    ```bash
+    claude --strict-mcp-config --mcp-config ./servers.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## System prompt
+
+<AccordionGroup>
+  <Accordion title="--system-prompt <prompt>">
+    **Type:** string
+
+    Replace the default system prompt with a custom prompt for the session.
+
+    ```bash
+    claude --system-prompt "You are a security auditor. Focus only on vulnerabilities."
+    ```
+  </Accordion>
+
+  <Accordion title="--append-system-prompt <prompt>">
+    **Type:** string
+
+    Append additional text to the default system prompt without replacing it.
+
+    ```bash
+    claude --append-system-prompt "Always output results as a numbered list."
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## File and directory access
+
+<AccordionGroup>
+  <Accordion title="--add-dir <directories...>">
+    **Type:** string list
+
+    Grant tool access to additional directories beyond the current working directory.
+
+    ```bash
+    claude --add-dir /shared/libs --add-dir /shared/configs
+    ```
+  </Accordion>
+
+  <Accordion title="--file <specs...>">
+    **Type:** string list
+
+    Download file resources at startup. Format: `file_id:relative_path`.
+
+    ```bash
+    claude --file file_abc123:doc.txt file_def456:image.png
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Settings
+
+<AccordionGroup>
+  <Accordion title="--settings <file-or-json>">
+    **Type:** string
+
+    Load additional settings from a JSON file path or an inline JSON string.
+
+    ```bash
+    # From a file
+    claude --settings ./my-settings.json
+
+    # Inline JSON
+    claude --settings '{"model": "sonnet", "verbose": true}'
+    ```
+  </Accordion>
+
+  <Accordion title="--setting-sources <sources>">
+    **Type:** string
+
+    Comma-separated list of setting sources to load. Accepted values: `user`, `project`, `local`.
+
+    ```bash
+    # Load only user-level settings (ignore project and local)
+    claude --setting-sources user
+
+    # Load user and project settings
+    claude --setting-sources user,project
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Plugins
+
+<AccordionGroup>
+  <Accordion title="--plugin-dir <path>">
+    **Type:** string (repeatable)
+
+    Load plugins from a directory for this session only. Repeat the flag to specify multiple directories.
+
+    ```bash
+    claude --plugin-dir ./my-plugins
+    claude --plugin-dir ./plugins-a --plugin-dir ./plugins-b
+    ```
+  </Accordion>
+
+  <Accordion title="--disable-slash-commands">
+    **Type:** boolean
+
+    Disable all skills (slash commands loaded from `skills/` directories and plugins).
+
+    ```bash
+    claude --disable-slash-commands -p "Do this without any custom skills"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## IDE integration
+
+<AccordionGroup>
+  <Accordion title="--ide">
+    **Type:** boolean
+
+    Automatically connect to an IDE on startup if exactly one valid IDE integration is available.
+
+    ```bash
+    claude --ide
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Chrome integration
+
+<AccordionGroup>
+  <Accordion title="--chrome">
+    **Type:** boolean
+
+    Enable the Claude in Chrome integration.
+
+    ```bash
+    claude --chrome
+    ```
+  </Accordion>
+
+  <Accordion title="--no-chrome">
+    **Type:** boolean
+
+    Disable the Claude in Chrome integration.
+
+    ```bash
+    claude --no-chrome
+    ```
+  </Accordion>
+</AccordionGroup>

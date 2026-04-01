@@ -1,0 +1,334 @@
+---
+title: "query()"
+description: "The core agent function — run Claude on a prompt and stream typed messages back."
+---
+
+`query()` is the primary way to run the Claude Code agent loop from TypeScript. It takes a prompt and an options object, then returns an async generator that yields `SDKMessage` objects as the agent works through the task.
+
+## Signature
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+import type { SDKMessage, SDKUserMessage, Options } from '@anthropic-ai/claude-code'
+
+function query(params: {
+  prompt: string | AsyncIterable<SDKUserMessage>
+  options?: Options
+}): AsyncGenerator<SDKMessage>
+```
+
+## Parameters
+
+<ParamField path="prompt" type="string | AsyncIterable<SDKUserMessage>" required>
+  The user prompt to send to the agent. Pass a plain string for a single turn, or an `AsyncIterable<SDKUserMessage>` to stream a multi-turn conversation.
+</ParamField>
+
+<ParamField path="options" type="Options">
+  Configuration for the agent run. All fields are optional unless noted.
+
+  <Expandable title="options fields">
+    <ParamField path="options.model" type="string">
+      The model to use, e.g. `'claude-opus-4-5'` or `'claude-sonnet-4-6'`. Defaults to the configured default model.
+    </ParamField>
+
+    <ParamField path="options.cwd" type="string">
+      Working directory for the agent. Defaults to `process.cwd()`. File operations and shell commands run relative to this path.
+    </ParamField>
+
+    <ParamField path="options.maxTurns" type="number">
+      Maximum number of agentic turns (API round-trips) before the agent stops. Prevents runaway loops in automated pipelines.
+    </ParamField>
+
+    <ParamField path="options.maxBudgetUsd" type="number">
+      Stop the agent if the estimated API cost exceeds this value in USD. The `result` message will have subtype `error_max_budget_usd` if this limit is hit.
+    </ParamField>
+
+    <ParamField path="options.systemPrompt" type="string">
+      Replace the default system prompt with a custom one.
+    </ParamField>
+
+    <ParamField path="options.appendSystemPrompt" type="string">
+      Append additional instructions to the default system prompt without fully replacing it.
+    </ParamField>
+
+    <ParamField path="options.permissionMode" type="'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk'">
+      Controls how tool-use permissions are handled:
+      - `'default'` — Prompt interactively for dangerous operations.
+      - `'acceptEdits'` — Auto-accept file edit operations.
+      - `'bypassPermissions'` — Skip all permission checks. Requires `allowDangerouslySkipPermissions`.
+      - `'plan'` — Planning mode. Claude reasons but no tools are executed.
+      - `'dontAsk'` — Deny any operation not pre-approved; never prompt.
+    </ParamField>
+
+    <ParamField path="options.allowedTools" type="string[]">
+      Allowlist of tool names Claude may use. Tools not in the list are hidden from the agent.
+    </ParamField>
+
+    <ParamField path="options.disallowedTools" type="string[]">
+      Denylist of tool names Claude may not use.
+    </ParamField>
+
+    <ParamField path="options.mcpServers" type="Record<string, McpServerConfig>">
+      MCP servers to connect before the agent starts. Supports `stdio`, `sse`, and `http` transport types. In-process SDK servers created with `createSdkMcpServer()` use type `'sdk'`.
+    </ParamField>
+
+    <ParamField path="options.signal" type="AbortSignal">
+      An `AbortSignal` to cancel the agent run mid-flight. When the signal fires, the generator throws `AbortError`.
+    </ParamField>
+
+    <ParamField path="options.outputFormat" type="JsonSchemaOutputFormat">
+      Request a structured JSON output that conforms to a JSON Schema. The result appears in `SDKResultSuccess.structured_output`.
+    </ParamField>
+
+    <ParamField path="options.thinking" type="ThinkingConfig">
+      Controls extended thinking:
+      - `{ type: 'adaptive' }` — Claude decides when and how much to think (Opus 4.6+).
+      - `{ type: 'enabled', budgetTokens?: number }` — Fixed thinking token budget.
+      - `{ type: 'disabled' }` — Disable thinking entirely.
+    </ParamField>
+
+    <ParamField path="options.sessionId" type="string">
+      Resume an existing session by its UUID. The agent loads the prior conversation and continues from the end of it.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return value
+
+`query()` returns `AsyncGenerator<SDKMessage>`. Iterate it with `for await`.
+
+The generator completes (returns) after yielding the final `result` message. The result is always the last message in the stream.
+
+<ResponseField name="SDKMessage" type="union">
+  A discriminated union over `type`. The important members:
+
+  <Expandable title="message types">
+    <ResponseField name="system (init)" type="SDKSystemMessage">
+      Always the first message. Contains `model`, `tools`, `mcp_servers`, `permissionMode`, and `claude_code_version`.
+    </ResponseField>
+
+    <ResponseField name="assistant" type="SDKAssistantMessage">
+      An assistant turn. `message.content` is an array of `TextBlock`, `ToolUseBlock`, or `ThinkingBlock` items from the Anthropic SDK. `error` is set if the turn failed (e.g. `'rate_limit'`).
+    </ResponseField>
+
+    <ResponseField name="user" type="SDKUserMessage">
+      A user turn, including tool results injected by the agent after tool calls complete.
+    </ResponseField>
+
+    <ResponseField name="tool_progress" type="SDKToolProgressMessage">
+      Heartbeat emitted during long-running tool calls. Contains `tool_name`, `tool_use_id`, and `elapsed_time_seconds`.
+    </ResponseField>
+
+    <ResponseField name="stream_event" type="SDKPartialAssistantMessage">
+      Raw streaming event from the Anthropic SDK. Use for token-level streaming.
+    </ResponseField>
+
+    <ResponseField name="result (success)" type="SDKResultSuccess">
+      Final message on a successful run. Key fields: `result` (text summary), `total_cost_usd`, `usage`, `num_turns`, `duration_ms`, `structured_output` (if `outputFormat` was set).
+    </ResponseField>
+
+    <ResponseField name="result (error)" type="SDKResultError">
+      Final message when the agent exits abnormally. `subtype` is one of:
+      - `'error_during_execution'`
+      - `'error_max_turns'`
+      - `'error_max_budget_usd'`
+      - `'error_max_structured_output_retries'`
+
+      The `errors` array contains human-readable error strings.
+    </ResponseField>
+
+    <ResponseField name="system (api_retry)" type="SDKAPIRetryMessage">
+      Emitted when an API call fails and will be retried. Contains `attempt`, `max_retries`, `retry_delay_ms`, and `error`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Basic usage
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+for await (const message of query({
+  prompt: 'What is 2 + 2?',
+  options: { model: 'claude-opus-4-5' },
+})) {
+  if (message.type === 'result' && message.subtype === 'success') {
+    console.log(message.result)
+    // => '4'
+  }
+}
+```
+
+### Collecting the text result
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+async function runAgent(prompt: string): Promise<string> {
+  for await (const message of query({ prompt })) {
+    if (message.type === 'result') {
+      if (message.subtype === 'success') return message.result
+      throw new Error(`Agent failed: ${message.errors?.join(', ')}`)
+    }
+  }
+  throw new Error('No result received')
+}
+
+const answer = await runAgent('Summarize the README in one sentence.')
+console.log(answer)
+```
+
+### Streaming text tokens
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+for await (const message of query({ prompt: 'Write a haiku about TypeScript.' })) {
+  if (message.type === 'stream_event') {
+    const event = message.event
+    if (
+      event.type === 'content_block_delta' &&
+      event.delta.type === 'text_delta'
+    ) {
+      process.stdout.write(event.delta.text)
+    }
+  }
+}
+```
+
+### Cancelling a run
+
+```typescript
+import { query, AbortError } from '@anthropic-ai/claude-code'
+
+const controller = new AbortController()
+
+// Cancel after 10 seconds
+setTimeout(() => controller.abort(), 10_000)
+
+try {
+  for await (const message of query({
+    prompt: 'Refactor the entire codebase.',
+    options: { signal: controller.signal },
+  })) {
+    // process messages
+  }
+} catch (err) {
+  if (err instanceof AbortError) {
+    console.log('Cancelled.')
+  } else {
+    throw err
+  }
+}
+```
+
+### Limiting turns and budget
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+for await (const message of query({
+  prompt: 'Fix all the lint errors.',
+  options: {
+    maxTurns: 20,
+    maxBudgetUsd: 0.50,
+    permissionMode: 'acceptEdits',
+  },
+})) {
+  if (message.type === 'result') {
+    if (message.subtype === 'error_max_turns') {
+      console.warn('Stopped: max turns reached')
+    } else if (message.subtype === 'error_max_budget_usd') {
+      console.warn('Stopped: budget exceeded')
+    }
+  }
+}
+```
+
+### Structured output
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+for await (const message of query({
+  prompt: 'List the exported functions in src/index.ts as JSON.',
+  options: {
+    outputFormat: {
+      type: 'json_schema',
+      schema: {
+        type: 'object',
+        properties: {
+          functions: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+        },
+        required: ['functions'],
+      },
+    },
+  },
+})) {
+  if (message.type === 'result' && message.subtype === 'success') {
+    const output = message.structured_output as { functions: string[] }
+    console.log(output.functions)
+  }
+}
+```
+
+### Using an MCP server
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+for await (const message of query({
+  prompt: 'Query the users table and count active accounts.',
+  options: {
+    mcpServers: {
+      database: {
+        type: 'stdio',
+        command: 'mcp-server-sqlite',
+        args: ['--db', './myapp.db'],
+      },
+    },
+  },
+})) {
+  if (message.type === 'result' && message.subtype === 'success') {
+    console.log(message.result)
+  }
+}
+```
+
+## Error handling
+
+The generator throws `AbortError` when cancelled via `AbortSignal`. Other fatal errors (network failures, authentication errors) propagate as standard `Error` instances.
+
+Non-fatal errors — such as a rate-limit retry — are emitted as `system (api_retry)` messages rather than thrown, so your iteration loop continues.
+
+```typescript
+import { query, AbortError } from '@anthropic-ai/claude-code'
+
+try {
+  for await (const message of query({ prompt: 'Do something.' })) {
+    if (message.type === 'system' && message.subtype === 'api_retry') {
+      console.warn(`API error, retrying (attempt ${message.attempt})…`)
+    }
+  }
+} catch (err) {
+  if (err instanceof AbortError) {
+    // user cancelled
+  } else {
+    // unexpected error
+    throw err
+  }
+}
+```
+
+## Permission denials
+
+When the agent attempts a tool call and permission is denied, the denial is recorded in `SDKResultSuccess.permission_denials` — an array of `{ tool_name, tool_use_id, tool_input }` objects. The agent sees the denial as a tool result and may adjust its approach or stop.
+
+<Warning>
+`permissionMode: 'bypassPermissions'` skips all permission checks and is intended for controlled, sandboxed environments only. Never use it on production machines or directories with sensitive data.
+</Warning>

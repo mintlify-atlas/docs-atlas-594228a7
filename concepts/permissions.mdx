@@ -1,0 +1,98 @@
+---
+title: "Permissions"
+description: "How Claude Code controls which tools it can use and which actions require your approval."
+---
+
+Claude Code operates with a permission system that lets you balance autonomy with oversight. Every tool call — running a shell command, editing a file, fetching a URL — is subject to permission rules before it executes.
+
+## Permission modes
+
+Claude Code has four permission modes you can switch between at any time.
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| **Default** | *(none)* | Asks for approval before running potentially dangerous commands |
+| **Plan** | `--permission-mode plan` | Claude only plans and reads — no writes or shell execution |
+| **Accept edits** | `--permission-mode acceptEdits` | Auto-approves file edits; still prompts for shell commands |
+| **Bypass permissions** | `--dangerously-skip-permissions` | Skips all permission checks — use only in sandboxed environments |
+
+Switch modes interactively with `/permissions` or pass `--permission-mode` at startup.
+
+<Warning>
+`bypassPermissions` and `--dangerously-skip-permissions` skip all safety checks. Only use these in isolated environments like CI containers or sandboxes where data loss is acceptable.
+</Warning>
+
+## Allow and deny rules
+
+You can write fine-grained rules that automatically allow or block specific tool calls without manual approval.
+
+Rules use the syntax `ToolName(pattern)`:
+
+```json ~/.claude/settings.json
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(npm test)",
+      "Read(src/**)",
+      "Edit(src/**)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(curl *)",
+      "Write(/etc/**)"
+    ]
+  }
+}
+```
+
+<Tip>
+Rules are evaluated in order: deny rules take precedence over allow rules. A blanket deny like `Bash(rm *)` will block matching commands even if an allow rule also matches.
+</Tip>
+
+### Pattern syntax
+
+- `Bash(git *)` — matches any `git` command in Bash
+- `Read(*.ts)` — matches reads of TypeScript files
+- `Edit(src/**)` — matches edits anywhere under `src/`
+- `Bash(*)` — matches all Bash commands (blanket allow/deny)
+
+### Scopes
+
+Rules can be placed at different levels:
+
+| File | Scope |
+|------|-------|
+| `~/.claude/settings.json` | Global — applies to all projects |
+| `.claude/settings.json` | Project — checked into the repo, shared with team |
+| `.claude/settings.local.json` | Local — project-specific, not committed |
+
+Project-level settings layer on top of global settings. Local settings layer on top of project settings.
+
+## The `/permissions` command
+
+Run `/permissions` inside a Claude Code session to interactively review and edit your current allow/deny rules. Changes take effect immediately without restarting.
+
+```bash
+> /permissions
+```
+
+## Plan mode
+
+Plan mode is a read-only mode where Claude can inspect your codebase and produce a structured plan — but cannot write files or execute shell commands.
+
+Use it when you want Claude to analyze a problem and propose a solution before making any changes:
+
+```bash
+claude --permission-mode plan
+```
+
+Inside a session, switch with `/plan`.
+
+## Hooks and permissions
+
+Hooks (see [Hooks](/configuration/hooks)) are also subject to permission checks. If a hook command matches a deny rule, it will be blocked before execution. You can use the `if` condition on hooks to scope them precisely and avoid triggering unnecessary permission prompts.
+
+## Enterprise policy
+
+In managed environments, administrators can enforce permission rules through a policy settings file. These rules cannot be overridden by users or project settings. Contact your administrator to review enforced policies.

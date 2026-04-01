@@ -1,0 +1,280 @@
+---
+title: "Skills"
+description: "Package reusable instructions, tool restrictions, and lifecycle hooks into Markdown files that Claude Code loads as slash commands."
+---
+
+Skills are Markdown files that Claude Code loads as slash commands. Each skill can include a system prompt, allowed tools, effort overrides, frontmatter hooks, and argument support. Skills live in a `skills/` directory under your Claude config and are loaded from user, project, and managed settings.
+
+## How skills work
+
+When you invoke `/my-skill` in Claude Code, the skill's Markdown content is sent as a prompt to the model. Frontmatter metadata controls which tools Claude may use, which model runs the skill, and other behaviors.
+
+Skills are a superset of the older `/commands/` system. The `skills/` directory format is the current standard.
+
+---
+
+## Directory structure
+
+Skills use the directory format: each skill is a folder containing a `SKILL.md` file.
+
+```
+~/.claude/skills/           # User-level skills (global)
+  my-skill/
+    SKILL.md
+
+.claude/skills/             # Project-level skills (shared with team)
+  deploy/
+    SKILL.md
+  test-runner/
+    SKILL.md
+```
+
+<Note>Single `.md` files are **not** supported in the `skills/` directory — you must use the `skill-name/SKILL.md` folder format.</Note>
+
+### Load order and precedence
+
+Skills are loaded from all three levels and merged. When the same file path is resolved (including through symlinks), duplicates are dropped with a warning. Load order from lowest to highest precedence:
+
+1. Managed skills (`policySettings`)
+2. User skills (`~/.claude/skills/`)
+3. Project skills (`.claude/skills/`)
+4. Additional directories (passed via `--add-dir`)
+
+---
+
+## SKILL.md format
+
+A skill file is a Markdown document with an optional YAML frontmatter block.
+
+````markdown .claude/skills/deploy/SKILL.md
+---
+description: "Deploy the current branch to the staging environment"
+allowed-tools:
+  - Bash
+  - Read
+effort: medium
+---
+
+Deploy the branch `$BRANCH` to staging:
+
+1. Run `./scripts/deploy.sh staging $BRANCH`
+2. Verify the deployment with `curl https://staging.example.com/health`
+3. Report the deployment status.
+````
+
+### Frontmatter fields
+
+<ParamField body="description" type="string">
+  One-sentence description shown in the `/` command picker. If omitted, Claude Code extracts a description from the first paragraph of the Markdown content.
+</ParamField>
+
+<ParamField body="name" type="string">
+  Display name shown to the user. Defaults to the skill folder name.
+</ParamField>
+
+<ParamField body="allowed-tools" type="array">
+  Restricts which tools the skill may use. Accepts tool names and permission patterns.
+
+  ```yaml
+  allowed-tools:
+    - Bash(git *)
+    - Read
+    - Write(*.md)
+  ```
+</ParamField>
+
+<ParamField body="argument-hint" type="string">
+  Hint shown in the command picker for required arguments (e.g. `"<branch-name>"`).
+</ParamField>
+
+<ParamField body="arguments" type="string | array">
+  Named argument placeholders that are substituted into the skill prompt.
+
+  ```yaml
+  arguments: [branch, environment]
+  ```
+
+  In the prompt body, use `$branch` and `$environment` as placeholders.
+</ParamField>
+
+<ParamField body="when_to_use" type="string">
+  Guidance for Claude about when to invoke this skill automatically (e.g. as part of another task).
+</ParamField>
+
+<ParamField body="model" type="string">
+  Model to use when running this skill. Set to `"inherit"` to use the active session model. Defaults to the session model if omitted.
+
+  ```yaml
+  model: claude-sonnet-4-6
+  ```
+</ParamField>
+
+<ParamField body="effort" type="string">
+  Effort level for this skill: `"low"`, `"medium"`, `"high"`, or `"max"`. Overrides the session effort for the skill's invocation.
+</ParamField>
+
+<ParamField body="user-invocable" type="boolean">
+  When `false`, the skill is hidden from the `/` picker and can only be invoked programmatically (e.g. by another skill or agent). Defaults to `true`.
+</ParamField>
+
+<ParamField body="disable-model-invocation" type="boolean">
+  When `true`, the skill's prompt is executed as a shell template rather than passed to the model. Defaults to `false`.
+</ParamField>
+
+<ParamField body="context" type="string">
+  Set to `"fork"` to run the skill in a forked context (isolated from the parent session's conversation history).
+</ParamField>
+
+<ParamField body="agent" type="string">
+  Name of a built-in or custom agent whose system prompt, tool restrictions, and model this skill should adopt.
+</ParamField>
+
+<ParamField body="paths" type="string | array">
+  Gitignore-style glob patterns. When set, the skill is a **conditional skill** — it is dormant until a file matching one of these patterns is touched in the session. Paths are matched relative to the working directory.
+
+  ```yaml
+  paths:
+    - "src/api/**"
+    - "*.graphql"
+  ```
+</ParamField>
+
+<ParamField body="shell" type="string">
+  Shell to use for inline `!` shell commands in the prompt body. Accepts `"bash"` or `"powershell"`.
+</ParamField>
+
+<ParamField body="version" type="string">
+  Semver string for the skill. Used for display and compatibility checks.
+</ParamField>
+
+<ParamField body="hooks" type="object">
+  Lifecycle hooks scoped to this skill's invocation. Uses the same schema as `settings.json` hooks. See [Hooks](/configuration/hooks) for full reference.
+
+  ```yaml
+  hooks:
+    PostToolUse:
+      - matcher: Write
+        hooks:
+          - type: command
+            command: "eslint --fix $CLAUDE_FILE_PATHS"
+  ```
+</ParamField>
+
+---
+
+## Built-in placeholders
+
+Inside the skill prompt body you can use:
+
+| Placeholder | Description |
+|---|---|
+| `$ARGUMENTS` | Full argument string passed when invoking the skill. |
+| `$<argname>` | Named argument (when `arguments` frontmatter is set). |
+| `${CLAUDE_SKILL_DIR}` | Absolute path to the skill's own directory. Useful for referencing bundled scripts or files. |
+| `${CLAUDE_SESSION_ID}` | Unique identifier for the current session. |
+
+---
+
+## Inline shell commands
+
+Skill prompts support inline shell command expansion using `` !`...` `` or fenced code blocks with a `!` language tag. The output is substituted into the prompt before it is sent to the model.
+
+```markdown
+Current git status:
+!`git status --short`
+
+Changed files:
+```!
+git diff --name-only HEAD
+```
+```
+
+<Warning>Inline shell execution is disabled for MCP skills (remote/untrusted sources) for security reasons.</Warning>
+
+---
+
+## Dynamic skill discovery
+
+Claude Code watches for new `.claude/skills/` directories as you navigate the project. When you read or write a file inside a subdirectory that contains a `.claude/skills/` folder, those skills are loaded automatically without restarting the session.
+
+Skills deeper in the directory tree take precedence over shallower ones with the same name.
+
+<Tip>Gitignored directories (e.g. `node_modules`) are never scanned for skills, even if they contain a `.claude/skills/` folder.</Tip>
+
+---
+
+## Conditional skills
+
+A skill with a `paths` frontmatter field is **conditional** — it stays dormant until the session touches a file matching one of the patterns. This keeps context lean in large monorepos by only surfacing skills relevant to the current work.
+
+```markdown
+---
+description: "GraphQL schema helpers"
+paths:
+  - "*.graphql"
+  - "src/schema/**"
+---
+
+You are working on GraphQL schema files...
+```
+
+Once a matching file is read or written, the skill is activated for the rest of the session.
+
+---
+
+## Creating your first skill
+
+<Steps>
+  <Step title="Create the skill directory">
+    ```bash
+    mkdir -p .claude/skills/my-skill
+    ```
+  </Step>
+  <Step title="Write SKILL.md">
+    ```markdown .claude/skills/my-skill/SKILL.md
+    ---
+    description: "Summarize the recent git history"
+    allowed-tools:
+      - Bash(git *)
+    effort: low
+    ---
+
+    Summarize the last 10 commits in this repository. Group related changes together and highlight anything that looks like a breaking change.
+    ```
+  </Step>
+  <Step title="Invoke the skill">
+    In Claude Code, type:
+
+    ```
+    /my-skill
+    ```
+
+    The skill appears in the `/` command picker and runs with the configured tools and effort level.
+  </Step>
+</Steps>
+
+---
+
+## Bundled skills
+
+Some skills ship compiled into the Claude Code binary itself. These are registered via `registerBundledSkill()` and are available to all users without any files on disk. Bundled skills:
+
+- Cannot be overridden by user or project skills.
+- May include reference files that are extracted to a temporary directory on first invocation (accessible via `${CLAUDE_SKILL_DIR}`).
+- Follow the same `SKILL.md` frontmatter contract (description, allowedTools, model, hooks, etc.).
+
+---
+
+## Skills in managed environments
+
+Enterprise administrators can provide skills via the managed skills directory or lock skill loading to plugin sources only:
+
+```json managed-settings.json
+{
+  "strictPluginOnlyCustomization": ["skills"]
+}
+```
+
+When `skills` is in `strictPluginOnlyCustomization`, user and project skills directories are ignored. Only plugin-provided and managed skills are loaded.
+
+The `CLAUDE_CODE_DISABLE_POLICY_SKILLS` environment variable disables managed skills entirely (useful during testing).

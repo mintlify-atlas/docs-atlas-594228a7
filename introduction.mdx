@@ -1,0 +1,156 @@
+---
+title: "Introduction"
+description: "A conceptual overview of Claude Code — what it is, how it works, and what it can do."
+---
+
+Claude Code is an AI-powered command-line tool that brings Claude directly into your terminal. Rather than switching between your editor, a browser, and a chat window, you work with Claude inside the same shell where your code lives. Claude reads your files, runs commands, edits code, and manages git — autonomously, with your permission.
+
+## What Claude Code is
+
+Claude Code is not a code-completion plugin or a chatbot with a file-attachment button. It is a stateful agent that maintains a conversation across multiple turns, calls real tools, and takes real actions in your project.
+
+When you run `claude` in a project directory, you get an interactive REPL. You describe a task in natural language, and Claude plans and executes it: reading source files, grepping for references, running your test suite, editing code, and committing changes. At each step it shows you what it is about to do and waits for your confirmation or proceeds autonomously, depending on the permission mode you have configured.
+
+## Architecture overview
+
+Claude Code is built on three layers:
+
+<CardGroup cols={3}>
+  <Card title="Tools" icon="wrench">
+    Discrete capabilities (read a file, run a bash command, fetch a URL, search the codebase) that Claude calls to interact with your environment.
+  </Card>
+  <Card title="Sessions" icon="clock-rotate-left">
+    A persistent conversation log stored on disk. Every message and tool result is appended to a `.jsonl` file so sessions can be resumed, shared, or compacted.
+  </Card>
+  <Card title="Permission system" icon="shield-check">
+    A layered allowlist/denylist that controls which tools and commands Claude can run, with modes ranging from fully interactive to fully autonomous.
+  </Card>
+</CardGroup>
+
+The CLI entrypoint (`entrypoints/cli.tsx`) bootstraps the process, then hands off to `main.tsx`, which parses flags, initializes configuration, and launches either an interactive REPL or a non-interactive `--print` session.
+
+## Built-in tools
+
+Claude has access to a rich set of built-in tools, all defined in `tools.ts` and the `tools/` directory:
+
+| Tool | What it does |
+|---|---|
+| `Bash` | Runs shell commands in a stateful shell process |
+| `FileRead` | Reads files and directories from disk |
+| `FileEdit` | Makes targeted edits to existing files |
+| `FileWrite` | Creates or overwrites files |
+| `Glob` | Finds files by glob pattern |
+| `Grep` | Searches file contents with regex |
+| `WebFetch` | Fetches and converts web pages to markdown |
+| `WebSearch` | Searches the web |
+| `TodoWrite` | Manages a structured task list for multi-step work |
+| `Agent` | Spawns a sub-agent to work on a task in parallel |
+| `NotebookEdit` | Edits Jupyter notebook cells |
+| `ListMcpResources` / `ReadMcpResource` | Reads MCP server resources |
+
+Additional tools become available through MCP servers you configure. Claude selects tools automatically based on the task at hand.
+
+## Slash commands
+
+Inside the interactive REPL, slash commands give you direct control over Claude Code's behavior. The full set is registered in `commands.ts`. Key commands include:
+
+| Command | What it does |
+|---|---|
+| `/clear` | Clears the current conversation |
+| `/compact` | Summarizes the conversation to reclaim context window space |
+| `/config` | Views and edits your configuration |
+| `/cost` | Shows token usage and estimated cost for the session |
+| `/doctor` | Diagnoses common configuration problems |
+| `/memory` | Views and edits the `CLAUDE.md` memory files |
+| `/mcp` | Manages MCP server connections |
+| `/model` | Switches the active model |
+| `/permissions` | Inspects and adjusts tool permissions |
+| `/resume` | Opens the session picker |
+| `/review` | Requests a code review |
+| `/session` | Manages session metadata |
+| `/status` | Shows context window usage, model, and permission mode |
+| `/vim` | Toggles vim-mode keybindings |
+
+## Authentication model
+
+Claude Code supports several authentication mechanisms, implemented in `utils/auth.ts`:
+
+<CardGroup cols={2}>
+  <Card title="Claude.ai OAuth" icon="key">
+    Sign in with your Claude.ai account (Pro or Team subscription). Claude Code stores OAuth tokens in your system keychain and refreshes them automatically.
+  </Card>
+  <Card title="Anthropic API key" icon="terminal">
+    Set `ANTHROPIC_API_KEY` in your environment. Suitable for API console customers and automation scripts.
+  </Card>
+  <Card title="Amazon Bedrock" icon="cloud">
+    Set `CLAUDE_CODE_USE_BEDROCK=1` and configure standard AWS credentials. Claude Code uses your AWS IAM identity to access Claude on Bedrock.
+  </Card>
+  <Card title="Google Vertex AI" icon="cloud">
+    Set `CLAUDE_CODE_USE_VERTEX=1` and configure GCP credentials. Claude Code authenticates through the Google Cloud SDK.
+  </Card>
+</CardGroup>
+
+The active auth method is resolved at startup. OAuth and API key methods are mutually exclusive: if `ANTHROPIC_API_KEY` is set in your environment, OAuth is disabled for that session.
+
+## Permission modes
+
+Claude Code's permission system lets you dial in how much autonomy to grant:
+
+| Mode | Behavior |
+|---|---|
+| `default` | Prompts before running bash commands and writing files; reads are always allowed |
+| `acceptEdits` | Auto-accepts file edit operations; still prompts for shell commands |
+| `plan` | Read-only planning mode — Claude outlines steps but does not execute any tools |
+| `dontAsk` | Denies any operation not pre-approved; never prompts |
+| `bypassPermissions` | Skips all permission prompts (use only in trusted, sandboxed environments) |
+
+You can set a session's permission mode with `--permission-mode <mode>` or interactively via `/permissions`.
+
+## Sessions and memory
+
+Every conversation is stored as a session. Sessions are identified by UUID and persisted in `~/.claude/projects/<project-slug>/` as append-only `.jsonl` log files. You can resume any past session with `--resume` or `-r`.
+
+Claude Code also reads `CLAUDE.md` files — a form of persistent project memory. Place a `CLAUDE.md` in your project root or in `~/.claude/` to give Claude standing context about your codebase, your conventions, or your preferences. The `/memory` command lets you view and edit these files from within a session.
+
+<Tip>
+Run `/init` inside a new project to have Claude generate a `CLAUDE.md` tailored to your codebase automatically.
+</Tip>
+
+## Multi-agent support
+
+Claude Code can spawn parallel sub-agents using the `Agent` tool. Each sub-agent runs in its own context but shares the same tool set and permission mode as the parent. This lets Claude break a large task into independent workstreams and run them concurrently — useful for large codebases, batch refactors, and complex pipelines.
+
+## MCP integration
+
+Claude Code implements the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), which lets you extend it with external servers. An MCP server can expose additional tools, resources, and prompts. You connect servers via `mcp add` or the `/mcp` command. Claude discovers their capabilities automatically at session startup.
+
+## Non-interactive mode
+
+Passing `--print` (or `-p`) switches Claude Code into non-interactive mode. It reads a prompt, runs to completion, prints the result, and exits. This mode is useful for scripting and CI:
+
+```bash
+claude --print "Summarize the changes in the last commit"
+```
+
+Output format can be controlled with `--output-format text` (default), `--output-format json`, or `--output-format stream-json`.
+
+<Note>
+In `--print` mode, the workspace trust dialog is skipped. Only run Claude Code with `--print` in directories you control and trust.
+</Note>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run Claude Code on a real project in under five minutes.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed install instructions for macOS, Linux, and Windows.
+  </Card>
+  <Card title="Sessions" icon="clock-rotate-left" href="/concepts/sessions">
+    Learn how conversation state is stored and resumed.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/commands">
+    Every flag and subcommand documented.
+  </Card>
+</CardGroup>

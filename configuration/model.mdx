@@ -1,0 +1,150 @@
+---
+title: "Model"
+description: "Choose which Claude model powers your session, set effort levels, and switch models on the fly with the /model command."
+---
+
+Claude Code supports multiple Claude models and lets you switch between them interactively or via configuration. Each model has different speed, capability, and cost tradeoffs. Effort levels further tune how much thinking a model applies to a given task.
+
+## Selecting a model
+
+### Interactive model picker
+
+Run `/model` with no arguments to open the interactive model selection menu. Use arrow keys to pick a model and, for supported models, adjust the effort level.
+
+```
+/model
+```
+
+### Set model directly
+
+Pass the model name or alias as an argument:
+
+```
+/model sonnet
+/model claude-sonnet-4-6
+/model opus
+/model default
+```
+
+Passing `default` resets the session to the configured default model.
+
+### Persist a model in settings
+
+To use a specific model in every session, set `model` in your user or project settings:
+
+```json ~/.claude/settings.json
+{
+  "model": "claude-sonnet-4-6"
+}
+```
+
+See [Settings](/configuration/settings) for all settings file locations and precedence rules.
+
+---
+
+## Model aliases
+
+Claude Code recognizes short aliases that always resolve to the latest recommended version of that model family:
+
+| Alias | Resolves to |
+|---|---|
+| `sonnet` | Latest Claude Sonnet |
+| `opus` | Latest Claude Opus |
+| `haiku` | Latest Claude Haiku |
+| `best` | Best available model |
+| `sonnet[1m]` | Claude Sonnet with 1M context |
+| `opus[1m]` | Claude Opus with 1M context |
+| `opusplan` | Opus model used in plan mode |
+
+Aliases are defined in `utils/model/aliases.ts` and are resolved at session start. Using an alias means your configuration follows model updates automatically.
+
+<Note>Extended context (`[1m]`) models require account access. Claude Code will show an error if your account does not have access when you attempt to select one.</Note>
+
+---
+
+## Effort levels
+
+Effort controls how deeply the model reasons before responding. Not all models support the effort parameter — it is currently available on `claude-opus-4-6` and `claude-sonnet-4-6`.
+
+### Available levels
+
+<CardGroup cols={2}>
+  <Card title="low" icon="bolt">
+    Quick, straightforward implementation with minimal overhead. Best for simple edits and fast iteration.
+  </Card>
+  <Card title="medium" icon="gauge">
+    Balanced approach with standard implementation and testing. The recommended default for most tasks.
+  </Card>
+  <Card title="high" icon="chart-line">
+    Comprehensive implementation with extensive testing and documentation. Used when thoroughness matters.
+  </Card>
+  <Card title="max" icon="sparkles">
+    Maximum capability with deepest reasoning. Opus 4.6 only. Session-scoped — not persisted to settings for external users.
+  </Card>
+</CardGroup>
+
+### Set effort via command
+
+Use `/effort` to change the effort level for the current session:
+
+```
+/effort low
+/effort medium
+/effort high
+```
+
+### Persist effort in settings
+
+Persist an effort level in `settings.json` using the `effortLevel` key:
+
+```json
+{
+  "effortLevel": "medium"
+}
+```
+
+<Warning>`"max"` effort is only supported on Opus 4.6. On other models it is automatically downgraded to `"high"`. For external users, `"max"` is session-scoped and never saved to `settings.json`.</Warning>
+
+### Effort precedence
+
+The effort value applied to each API call follows this precedence chain:
+
+```
+CLAUDE_CODE_EFFORT_LEVEL (env var)  →  session effortValue  →  model default
+```
+
+Setting `CLAUDE_CODE_EFFORT_LEVEL=unset` in your environment disables the effort parameter entirely, letting the API apply its own default.
+
+### Default effort by model
+
+Default effort levels are determined at runtime and vary by subscription type:
+
+- **Opus 4.6 + Pro subscription**: defaults to `medium`
+- **Opus 4.6 + Max/Team** (when configured): defaults to `medium`
+- **Other supported models**: no default (API applies `high` internally)
+
+---
+
+## Enterprise model controls
+
+Administrators can restrict which models are available to users via the `availableModels` setting in managed settings:
+
+```json managed-settings.json
+{
+  "availableModels": ["sonnet", "claude-sonnet-4-6"]
+}
+```
+
+If a user attempts to select a model not in the allowlist, Claude Code will display an error and keep the current model.
+
+An empty `availableModels` array restricts users to only the default model.
+
+Model IDs can also be remapped to provider-specific identifiers (e.g. Amazon Bedrock ARNs) via `modelOverrides`:
+
+```json managed-settings.json
+{
+  "modelOverrides": {
+    "claude-opus-4-6": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1"
+  }
+}
+```

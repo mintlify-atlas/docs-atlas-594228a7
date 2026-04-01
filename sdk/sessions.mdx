@@ -1,0 +1,448 @@
+---
+title: "Sessions"
+description: "Persistent multi-turn sessions and session management utilities in the SDK."
+---
+
+The SDK exposes two distinct layers of session support:
+
+1. **V2 session API** (`unstable_v2_*`) — persistent, named sessions for multi-turn conversations where the same `SDKSession` object drives many prompts over time.
+2. **Session management utilities** (`listSessions`, `getSessionInfo`, `getSessionMessages`, `renameSession`, `tagSession`, `forkSession`) — read and mutate the on-disk session records that Claude Code persists at `~/.claude/projects/`.
+
+<Warning>
+The V2 session API is unstable (`@alpha`). Function names are prefixed with `unstable_v2_` to signal that signatures may change before stabilisation.
+</Warning>
+
+## V2 session API
+
+### `unstable_v2_createSession()`
+
+Creates a new, persistent session and returns an `SDKSession` handle. Use this when you need to send multiple prompts to the same agent over time.
+
+```typescript
+function unstable_v2_createSession(options: SDKSessionOptions): SDKSession
+```
+
+#### SDKSessionOptions
+
+<ParamField path="model" type="string" required>
+  Model to use for this session, e.g. `'claude-opus-4-5'` or `'claude-sonnet-4-6'`.
+</ParamField>
+
+<ParamField path="cwd" type="string">
+  Working directory for the session. Defaults to `process.cwd()`.
+</ParamField>
+
+<ParamField path="systemPrompt" type="string">
+  Custom system prompt to replace the default.
+</ParamField>
+
+<ParamField path="appendSystemPrompt" type="string">
+  Additional instructions appended to the default system prompt.
+</ParamField>
+
+<ParamField path="permissionMode" type="'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk'">
+  Permission handling mode for tool calls in this session.
+</ParamField>
+
+<ParamField path="maxTurns" type="number">
+  Maximum agent turns per prompt.
+</ParamField>
+
+<ParamField path="mcpServers" type="Record<string, McpServerConfig>">
+  MCP servers to attach to the session.
+</ParamField>
+
+#### Example
+
+```typescript
+import { unstable_v2_createSession } from '@anthropic-ai/claude-code'
+
+const session = unstable_v2_createSession({
+  model: 'claude-opus-4-5',
+  cwd: '/home/user/my-project',
+  permissionMode: 'acceptEdits',
+})
+
+// Send first prompt
+const result1 = await session.prompt('Add a README.')
+console.log(result1.result)
+
+// Session retains full conversation history
+const result2 = await session.prompt('Now add a CONTRIBUTING guide that cross-references the README.')
+console.log(result2.result)
+```
+
+### `unstable_v2_resumeSession()`
+
+Resumes an existing session by ID, loading its prior conversation history before accepting new prompts.
+
+```typescript
+function unstable_v2_resumeSession(
+  sessionId: string,
+  options: SDKSessionOptions,
+): SDKSession
+```
+
+<ParamField path="sessionId" type="string" required>
+  UUID of the session to resume. Obtain this from `listSessions()` or a previously created session.
+</ParamField>
+
+<ParamField path="options" type="SDKSessionOptions" required>
+  Session options. The `model` field is required.
+</ParamField>
+
+#### Example
+
+```typescript
+import {
+  listSessions,
+  unstable_v2_resumeSession,
+} from '@anthropic-ai/claude-code'
+
+// Find the most recent session for this project
+const sessions = await listSessions({ dir: process.cwd(), limit: 1 })
+const sessionId = sessions[0]?.sessionId
+
+if (sessionId) {
+  const session = unstable_v2_resumeSession(sessionId, {
+    model: 'claude-opus-4-5',
+  })
+
+  const result = await session.prompt('What were we working on?')
+  console.log(result.result)
+}
+```
+
+### `unstable_v2_prompt()`
+
+A one-shot convenience function that creates a session, sends a single prompt, and returns the result — without keeping the session object alive.
+
+```typescript
+async function unstable_v2_prompt(
+  message: string,
+  options: SDKSessionOptions,
+): Promise<SDKResultMessage>
+```
+
+#### Example
+
+```typescript
+import { unstable_v2_prompt } from '@anthropic-ai/claude-code'
+
+const result = await unstable_v2_prompt('What files are in this directory?', {
+  model: 'claude-sonnet-4-6',
+  cwd: process.cwd(),
+})
+
+if (result.subtype === 'success') {
+  console.log(result.result)
+}
+```
+
+<Tip>
+Use `unstable_v2_prompt()` for quick one-offs. Use `unstable_v2_createSession()` when you need conversation continuity across multiple turns.
+</Tip>
+
+---
+
+## Session management utilities
+
+These functions read and write the on-disk JSONL transcripts that Claude Code stores in `~/.claude/projects/`. They work independently of any running session.
+
+### `listSessions()`
+
+Lists sessions with metadata.
+
+```typescript
+async function listSessions(
+  options?: ListSessionsOptions,
+): Promise<SDKSessionInfo[]>
+```
+
+When `dir` is provided, returns sessions for that project directory and its git worktrees. When omitted, returns sessions across all projects.
+
+#### ListSessionsOptions
+
+<ParamField path="dir" type="string">
+  Project directory. When provided, returns only sessions for that project (and its git worktrees). When omitted, returns all sessions across every project.
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of sessions to return.
+</ParamField>
+
+<ParamField path="offset" type="number">
+  Number of sessions to skip from the sorted result. Use with `limit` for pagination. Defaults to `0`.
+</ParamField>
+
+<ParamField path="includeWorktrees" type="boolean">
+  When `dir` is inside a git repository, include sessions from all git worktree paths. Defaults to `true`.
+</ParamField>
+
+#### SDKSessionInfo fields
+
+<ResponseField name="sessionId" type="string">
+  Unique session identifier (UUID).
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  Display title: custom title if set, otherwise the auto-generated summary or first prompt.
+</ResponseField>
+
+<ResponseField name="lastModified" type="number">
+  Last modified time in milliseconds since epoch.
+</ResponseField>
+
+<ResponseField name="createdAt" type="number | undefined">
+  Creation time in milliseconds since epoch, extracted from the first entry's timestamp field.
+</ResponseField>
+
+<ResponseField name="cwd" type="string | undefined">
+  Working directory the session ran in.
+</ResponseField>
+
+<ResponseField name="gitBranch" type="string | undefined">
+  Git branch at the end of the session.
+</ResponseField>
+
+<ResponseField name="customTitle" type="string | undefined">
+  User-set title (from `/rename` or `renameSession()`).
+</ResponseField>
+
+<ResponseField name="firstPrompt" type="string | undefined">
+  First meaningful user prompt in the session.
+</ResponseField>
+
+<ResponseField name="tag" type="string | undefined">
+  User-set tag (from `tagSession()`).
+</ResponseField>
+
+<ResponseField name="fileSize" type="number | undefined">
+  Size of the JSONL transcript in bytes.
+</ResponseField>
+
+#### Example
+
+```typescript
+import { listSessions } from '@anthropic-ai/claude-code'
+
+// List the 10 most recent sessions for this project
+const sessions = await listSessions({
+  dir: process.cwd(),
+  limit: 10,
+})
+
+for (const s of sessions) {
+  const date = new Date(s.lastModified).toLocaleDateString()
+  console.log(`${s.sessionId} — ${s.summary} (${date})`)
+}
+
+// Paginate: get the second page of 50 sessions across all projects
+const page2 = await listSessions({ limit: 50, offset: 50 })
+```
+
+### `getSessionInfo()`
+
+Reads metadata for a single session by ID. More efficient than `listSessions()` when you already know the session ID, because it only reads that one file.
+
+```typescript
+async function getSessionInfo(
+  sessionId: string,
+  options?: GetSessionInfoOptions,
+): Promise<SDKSessionInfo | undefined>
+```
+
+Returns `undefined` if the session file is not found, is a sidechain session, or has no extractable summary.
+
+#### GetSessionInfoOptions
+
+<ParamField path="dir" type="string">
+  Project directory to search. Omit to search across all project directories.
+</ParamField>
+
+#### Example
+
+```typescript
+import { getSessionInfo } from '@anthropic-ai/claude-code'
+
+const info = await getSessionInfo('550e8400-e29b-41d4-a716-446655440000')
+if (info) {
+  console.log(info.summary, info.cwd)
+}
+```
+
+### `getSessionMessages()`
+
+Reads the full conversation history from a session's JSONL transcript. Parses the file, builds the message chain from `parentUuid` links, and returns messages in chronological order.
+
+```typescript
+async function getSessionMessages(
+  sessionId: string,
+  options?: GetSessionMessagesOptions,
+): Promise<SessionMessage[]>
+```
+
+Returns an empty array if the session is not found.
+
+#### GetSessionMessagesOptions
+
+<ParamField path="dir" type="string">
+  Project directory. Omit to search all project directories.
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of messages to return.
+</ParamField>
+
+<ParamField path="offset" type="number">
+  Number of messages to skip from the beginning of the ordered list. Use with `limit` for pagination.
+</ParamField>
+
+<ParamField path="includeSystemMessages" type="boolean">
+  When `true`, includes `system` messages in the returned list. Defaults to `false` (only `user` and `assistant` messages).
+</ParamField>
+
+#### Example
+
+```typescript
+import { getSessionMessages } from '@anthropic-ai/claude-code'
+
+const messages = await getSessionMessages(
+  '550e8400-e29b-41d4-a716-446655440000',
+  { includeSystemMessages: false },
+)
+
+for (const msg of messages) {
+  console.log(`[${msg.role}]`, msg.content)
+}
+```
+
+### `renameSession()`
+
+Sets a custom title for a session. Appends a `custom-title` entry to the session's JSONL file.
+
+```typescript
+async function renameSession(
+  sessionId: string,
+  title: string,
+  options?: SessionMutationOptions,
+): Promise<void>
+```
+
+#### SessionMutationOptions
+
+<ParamField path="dir" type="string">
+  Project directory. Omit to search all projects.
+</ParamField>
+
+#### Example
+
+```typescript
+import { renameSession } from '@anthropic-ai/claude-code'
+
+await renameSession(
+  '550e8400-e29b-41d4-a716-446655440000',
+  'Refactor auth module — April sprint',
+)
+```
+
+### `tagSession()`
+
+Sets or clears a tag on a session. Pass `null` to remove the existing tag.
+
+```typescript
+async function tagSession(
+  sessionId: string,
+  tag: string | null,
+  options?: SessionMutationOptions,
+): Promise<void>
+```
+
+#### Example
+
+```typescript
+import { tagSession } from '@anthropic-ai/claude-code'
+
+// Set a tag
+await tagSession('550e8400-e29b-41d4-a716-446655440000', 'needs-review')
+
+// Clear the tag
+await tagSession('550e8400-e29b-41d4-a716-446655440000', null)
+```
+
+### `forkSession()`
+
+Copies a session transcript into a new session file with fresh UUIDs, preserving the `parentUuid` chain. Useful for creating alternate branches from a known conversation state.
+
+```typescript
+async function forkSession(
+  sessionId: string,
+  options?: ForkSessionOptions,
+): Promise<ForkSessionResult>
+```
+
+Returns `{ sessionId }` — the UUID of the newly created session.
+
+<Note>
+Forked sessions start without undo history. File-system snapshots are not copied; only the conversation transcript is forked.
+</Note>
+
+#### ForkSessionOptions
+
+<ParamField path="dir" type="string">
+  Project directory of the source session.
+</ParamField>
+
+<ParamField path="upToMessageId" type="string">
+  Fork from a specific point in the conversation. Messages after this UUID are not included in the new session. Omit to copy the full transcript.
+</ParamField>
+
+<ParamField path="title" type="string">
+  Custom title for the forked session.
+</ParamField>
+
+#### Example
+
+```typescript
+import { forkSession, getSessionMessages } from '@anthropic-ai/claude-code'
+
+const messages = await getSessionMessages('550e8400-e29b-41d4-a716-446655440000')
+
+// Fork at the third message
+const thirdMessageId = messages[2]?.uuid
+
+const { sessionId: forkedId } = await forkSession(
+  '550e8400-e29b-41d4-a716-446655440000',
+  {
+    upToMessageId: thirdMessageId,
+    title: 'Alternate approach from step 3',
+  },
+)
+
+console.log('New session:', forkedId)
+```
+
+---
+
+## Working with session IDs
+
+Session IDs are UUIDs. You can obtain them from:
+
+- `listSessions()` — returns `SDKSessionInfo[]`, each with a `sessionId`
+- `getSessionInfo()` — looks up a single session
+- The `session_id` field on any `SDKMessage` yielded by `query()`
+- The `SDKSystemMessage` init message, which carries the active `session_id`
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+let activeSessionId: string | undefined
+
+for await (const message of query({ prompt: 'Hello.' })) {
+  if (!activeSessionId && 'session_id' in message) {
+    activeSessionId = message.session_id
+  }
+}
+
+console.log('Session ID:', activeSessionId)
+```

@@ -1,0 +1,450 @@
+---
+title: "Settings"
+description: "Configure Claude Code globally, per project, or locally using layered JSON settings files."
+---
+
+Claude Code loads settings from multiple sources and merges them in priority order. Understanding which file controls what allows you to apply the right scope — personal preferences globally, shared norms per repo, and sensitive or ephemeral overrides locally.
+
+## Settings files
+
+<CardGroup cols={2}>
+  <Card title="User settings" icon="user">
+    `~/.claude/settings.json`
+
+    Applies to every Claude Code session for your account. Suitable for personal defaults like preferred model, effort level, or shell.
+  </Card>
+  <Card title="Project settings" icon="folder">
+    `.claude/settings.json`
+
+    Checked into the repository. Shared with your team. Use for project-wide permissions, MCP servers, and hooks.
+  </Card>
+  <Card title="Local settings" icon="lock">
+    `.claude/settings.local.json`
+
+    Gitignored automatically. Per-developer overrides that should not be committed (e.g. personal API keys or local tool paths).
+  </Card>
+  <Card title="Policy settings" icon="building">
+    Managed via MDM / `managed-settings.json`
+
+    Set by enterprise administrators. Always wins. Users cannot override policy settings.
+  </Card>
+</CardGroup>
+
+### Precedence order
+
+When the same key appears in multiple files, the later source wins:
+
+```
+userSettings → projectSettings → localSettings → flagSettings → policySettings
+```
+
+Policy settings (enterprise MDM) always take final precedence regardless of what users or projects specify.
+
+## JSON Schema
+
+Add `$schema` to any settings file for editor autocompletion and validation:
+
+```json settings.json
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json"
+}
+```
+
+---
+
+## All configuration options
+
+### Authentication
+
+<AccordionGroup>
+  <Accordion title="apiKeyHelper">
+    Path to a script that outputs authentication values. Claude Code executes this script and uses its stdout as the API key.
+
+    ```json
+    {
+      "apiKeyHelper": "/usr/local/bin/get-api-key.sh"
+    }
+    ```
+  </Accordion>
+  <Accordion title="awsCredentialExport">
+    Path to a script that exports AWS credentials for use with Amazon Bedrock.
+
+    ```json
+    {
+      "awsCredentialExport": "~/.claude/scripts/aws-creds.sh"
+    }
+    ```
+  </Accordion>
+  <Accordion title="awsAuthRefresh">
+    Path to a script that refreshes AWS authentication.
+  </Accordion>
+  <Accordion title="gcpAuthRefresh">
+    Command to refresh GCP authentication.
+
+    ```json
+    {
+      "gcpAuthRefresh": "gcloud auth application-default login"
+    }
+    ```
+  </Accordion>
+  <Accordion title="forceLoginMethod">
+    Force a specific login method. `"claudeai"` for Claude Pro/Max, `"console"` for Console billing.
+
+    ```json
+    {
+      "forceLoginMethod": "claudeai"
+    }
+    ```
+  </Accordion>
+  <Accordion title="forceLoginOrgUUID">
+    Organization UUID to use for OAuth login. Appended as a URL parameter to the authorization URL.
+  </Accordion>
+</AccordionGroup>
+
+### Model and inference
+
+<AccordionGroup>
+  <Accordion title="model">
+    Override the default model. Accepts a full model ID or an alias (`sonnet`, `opus`, `haiku`, `best`).
+
+    ```json
+    {
+      "model": "claude-sonnet-4-6"
+    }
+    ```
+  </Accordion>
+  <Accordion title="effortLevel">
+    Persisted effort level for supported models. Accepted values: `"low"`, `"medium"`, `"high"`. Affects how much the model thinks before responding.
+
+    ```json
+    {
+      "effortLevel": "medium"
+    }
+    ```
+
+    <Note>`"max"` effort is Opus 4.6 only and is session-scoped for external users — it is not persisted to settings.</Note>
+  </Accordion>
+  <Accordion title="availableModels">
+    Enterprise allowlist of models users may select. Accepts family aliases (`"opus"`), version prefixes (`"opus-4-5"`), and full model IDs. An empty array restricts users to only the default model.
+
+    ```json
+    {
+      "availableModels": ["sonnet", "claude-sonnet-4-6"]
+    }
+    ```
+  </Accordion>
+  <Accordion title="modelOverrides">
+    Map Anthropic model IDs to provider-specific IDs (e.g. Amazon Bedrock inference profile ARNs). Typically used in managed settings.
+
+    ```json
+    {
+      "modelOverrides": {
+        "claude-opus-4-6": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1"
+      }
+    }
+    ```
+  </Accordion>
+  <Accordion title="alwaysThinkingEnabled">
+    When `false`, thinking (extended reasoning) is disabled entirely. When absent or `true`, thinking is enabled automatically for models that support it.
+  </Accordion>
+  <Accordion title="fastMode">
+    Enable fast mode. When `true`, Claude routes certain requests to a faster, lighter model.
+  </Accordion>
+  <Accordion title="fastModePerSessionOptIn">
+    When `true`, fast mode does not persist across sessions. Each new session starts with fast mode off.
+  </Accordion>
+  <Accordion title="advisorModel">
+    Override the model used for server-side advisor tool calls.
+  </Accordion>
+</AccordionGroup>
+
+### Permissions
+
+<AccordionGroup>
+  <Accordion title="permissions">
+    Configure tool usage permissions with `allow`, `deny`, and `ask` rule lists.
+
+    ```json
+    {
+      "permissions": {
+        "allow": ["Bash(git *)", "Read(*.ts)"],
+        "deny": ["Bash(rm -rf *)"],
+        "ask": ["Write(*.prod.*)"],
+        "defaultMode": "acceptEdits"
+      }
+    }
+    ```
+
+    Permission rules use the syntax `ToolName(pattern)`. The `defaultMode` controls what happens when no rule matches.
+  </Accordion>
+  <Accordion title="allowManagedPermissionRulesOnly">
+    When `true` (and set in managed settings), only allow/deny/ask rules from managed settings are respected. User, project, local, and CLI argument rules are ignored.
+  </Accordion>
+  <Accordion title="disableBypassPermissionsMode">
+    Set to `"disable"` to prevent users from enabling bypass permissions mode.
+
+    ```json
+    {
+      "permissions": {
+        "disableBypassPermissionsMode": "disable"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Hooks
+
+<AccordionGroup>
+  <Accordion title="hooks">
+    Define lifecycle hooks that run shell commands, LLM prompts, HTTP requests, or sub-agents in response to tool events. See the [Hooks](/configuration/hooks) page for full reference.
+
+    ```json
+    {
+      "hooks": {
+        "PostToolUse": [
+          {
+            "matcher": "Write",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "prettier --write $CLAUDE_FILE_PATHS"
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+  </Accordion>
+  <Accordion title="disableAllHooks">
+    When `true`, disables all hooks and `statusLine` execution.
+  </Accordion>
+  <Accordion title="allowManagedHooksOnly">
+    When `true` (set in managed settings only), only hooks from managed settings run. User, project, and local hooks are ignored.
+  </Accordion>
+  <Accordion title="allowedHttpHookUrls">
+    Allowlist of URL patterns that HTTP hooks may target. Supports `*` as a wildcard. When set, HTTP hooks with non-matching URLs are blocked.
+
+    ```json
+    {
+      "allowedHttpHookUrls": ["https://hooks.example.com/*"]
+    }
+    ```
+  </Accordion>
+  <Accordion title="httpHookAllowedEnvVars">
+    Allowlist of environment variable names that HTTP hooks may interpolate into headers.
+
+    ```json
+    {
+      "httpHookAllowedEnvVars": ["MY_AUTH_TOKEN", "WEBHOOK_SECRET"]
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Environment variables
+
+<AccordionGroup>
+  <Accordion title="env">
+    Environment variables injected into every Claude Code session.
+
+    ```json
+    {
+      "env": {
+        "NODE_ENV": "development",
+        "ANTHROPIC_API_KEY": "sk-..."
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### MCP servers
+
+<AccordionGroup>
+  <Accordion title="enableAllProjectMcpServers">
+    Automatically approve all MCP servers declared in `.mcp.json`.
+  </Accordion>
+  <Accordion title="allowedMcpServers">
+    Enterprise allowlist of MCP servers. Accepts entries matching by `serverName`, `serverCommand`, or `serverUrl`. When set, only listed servers are permitted.
+
+    ```json
+    {
+      "allowedMcpServers": [
+        { "serverName": "filesystem" },
+        { "serverUrl": "https://mcp.example.com/*" }
+      ]
+    }
+    ```
+  </Accordion>
+  <Accordion title="deniedMcpServers">
+    Enterprise denylist of MCP servers. Denylist takes precedence over allowlist.
+
+    ```json
+    {
+      "deniedMcpServers": [
+        { "serverName": "untrusted-server" }
+      ]
+    }
+    ```
+  </Accordion>
+  <Accordion title="allowManagedMcpServersOnly">
+    When `true` (set in managed settings), `allowedMcpServers` is only read from managed settings. Users can still add their own servers, but only the admin-defined allowlist applies.
+  </Accordion>
+</AccordionGroup>
+
+### Git and attribution
+
+<AccordionGroup>
+  <Accordion title="attribution">
+    Customize attribution text appended to commits and pull requests.
+
+    ```json
+    {
+      "attribution": {
+        "commit": "Co-authored-by: Claude <noreply@anthropic.com>",
+        "pr": ""
+      }
+    }
+    ```
+
+    Set either field to an empty string `""` to suppress attribution entirely for that surface.
+  </Accordion>
+  <Accordion title="includeGitInstructions">
+    Include built-in commit and PR workflow instructions in Claude's system prompt. Defaults to `true`.
+  </Accordion>
+  <Accordion title="worktree">
+    Git worktree configuration for the `--worktree` flag.
+
+    ```json
+    {
+      "worktree": {
+        "symlinkDirectories": ["node_modules", ".cache"],
+        "sparsePaths": ["src", "packages/core"]
+      }
+    }
+    ```
+
+    `symlinkDirectories` avoids disk bloat by symlinking shared directories from the main repository. `sparsePaths` uses git sparse-checkout (cone mode) to check out only the listed paths — dramatically faster in large monorepos.
+  </Accordion>
+</AccordionGroup>
+
+### UI and appearance
+
+<AccordionGroup>
+  <Accordion title="language">
+    Preferred language for Claude responses and voice dictation.
+
+    ```json
+    {
+      "language": "japanese"
+    }
+    ```
+  </Accordion>
+  <Accordion title="outputStyle">
+    Controls the output style for assistant responses.
+  </Accordion>
+  <Accordion title="syntaxHighlightingDisabled">
+    Disable syntax highlighting in diffs.
+  </Accordion>
+  <Accordion title="prefersReducedMotion">
+    Reduce or disable animations (spinner shimmer, flash effects, etc.) for accessibility.
+  </Accordion>
+  <Accordion title="statusLine">
+    Display a custom status line rendered by a shell command.
+
+    ```json
+    {
+      "statusLine": {
+        "type": "command",
+        "command": "~/scripts/my-status.sh",
+        "padding": 2
+      }
+    }
+    ```
+  </Accordion>
+  <Accordion title="spinnerVerbs">
+    Customize the action verbs shown in the spinner.
+
+    ```json
+    {
+      "spinnerVerbs": {
+        "mode": "append",
+        "verbs": ["deploying", "terraforming"]
+      }
+    }
+    ```
+
+    `mode: "append"` adds to the defaults; `"replace"` uses only your verbs.
+  </Accordion>
+  <Accordion title="terminalTitleFromRename">
+    When `true` (default), `/rename` updates the terminal tab title.
+  </Accordion>
+</AccordionGroup>
+
+### Memory and sessions
+
+<AccordionGroup>
+  <Accordion title="cleanupPeriodDays">
+    Number of days to retain chat transcripts. Default is `30`. Setting to `0` disables session persistence entirely — no transcripts are written and existing ones are deleted at startup.
+
+    ```json
+    {
+      "cleanupPeriodDays": 7
+    }
+    ```
+  </Accordion>
+  <Accordion title="autoMemoryEnabled">
+    Enable auto-memory for the project. When `false`, Claude will not read from or write to the auto-memory directory.
+  </Accordion>
+  <Accordion title="autoMemoryDirectory">
+    Custom directory for auto-memory storage. Supports `~/` prefix. Ignored if set in project settings for security. Defaults to `~/.claude/projects/<sanitized-cwd>/memory/`.
+  </Accordion>
+  <Accordion title="plansDirectory">
+    Custom directory for plan files, relative to project root. Defaults to `~/.claude/plans/`.
+  </Accordion>
+  <Accordion title="claudeMdExcludes">
+    Glob patterns or absolute paths of `CLAUDE.md` files to exclude from loading.
+
+    ```json
+    {
+      "claudeMdExcludes": ["**/vendor/**", "/home/user/monorepo/CLAUDE.md"]
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Enterprise controls
+
+<AccordionGroup>
+  <Accordion title="strictPluginOnlyCustomization">
+    Lock customization surfaces so only plugins (not user/project files) can provide them. Accepts `true` (lock all four surfaces), `false` (explicit no-op), or an array of surface names: `"skills"`, `"agents"`, `"hooks"`, `"mcp"`.
+
+    ```json
+    {
+      "strictPluginOnlyCustomization": ["hooks", "mcp"]
+    }
+    ```
+  </Accordion>
+  <Accordion title="autoUpdatesChannel">
+    Release channel for auto-updates. Either `"latest"` or `"stable"`.
+  </Accordion>
+  <Accordion title="minimumVersion">
+    Minimum version to stay on — prevents downgrades when switching to the stable channel.
+  </Accordion>
+  <Accordion title="companyAnnouncements">
+    An array of announcement strings to display at startup (one is randomly selected).
+
+    ```json
+    {
+      "companyAnnouncements": [
+        "Our internal MCP server has been updated — run /mcp to reconnect."
+      ]
+    }
+    ```
+  </Accordion>
+  <Accordion title="skipWebFetchPreflight">
+    Skip the WebFetch blocklist check for enterprise environments with restrictive security policies.
+  </Accordion>
+</AccordionGroup>

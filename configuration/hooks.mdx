@@ -1,0 +1,424 @@
+---
+title: "Hooks"
+description: "Run shell commands, LLM prompts, HTTP requests, or sub-agents automatically in response to Claude Code lifecycle events."
+---
+
+Hooks let you automate actions that happen before or after tool calls, at session boundaries, and at other lifecycle points. They are defined in `settings.json` under the `hooks` key and are available at the user, project, and managed settings levels.
+
+## Quick example
+
+Run `prettier` after every file write:
+
+```json .claude/settings.json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "prettier --write $CLAUDE_FILE_PATHS"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Interactive configuration
+
+Run `/hooks` inside Claude Code to open the hooks configuration menu. The menu lists available events, lets you add or remove matchers and hook commands, and writes changes back to the appropriate settings file.
+
+---
+
+## Hook structure
+
+A hook configuration maps **event names** to arrays of **matcher objects**. Each matcher object specifies an optional tool filter and a list of hook commands to run when the filter matches.
+
+```json
+{
+  "hooks": {
+    "<EventName>": [
+      {
+        "matcher": "<optional filter>",
+        "hooks": [
+          { "type": "command", "command": "..." },
+          { "type": "prompt",  "prompt": "..." }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Matcher
+
+The `matcher` field is optional. When present it uses permission rule syntax — the same patterns used in `permissions.allow` and `permissions.deny` — to filter which tool calls trigger the hook.
+
+```json
+{ "matcher": "Bash(git *)" }     // Only git commands
+{ "matcher": "Write(*.ts)" }     // Only writes to TypeScript files
+{ "matcher": "Read" }            // Any Read call
+```
+
+When `matcher` is absent the hooks run for every tool call under that event.
+
+---
+
+## Hook events
+
+<AccordionGroup>
+  <Accordion title="PreToolUse">
+    Fires immediately before Claude executes a tool. Use this event to validate, log, or block tool calls before they run. A non-zero exit code from a `command` hook can abort the tool call.
+  </Accordion>
+  <Accordion title="PostToolUse">
+    Fires after a tool completes successfully. Use this to run formatters, linters, or notifications based on what Claude just did.
+  </Accordion>
+  <Accordion title="PostToolUseFailure">
+    Fires when a tool call fails. Useful for cleanup or alerting on errors.
+  </Accordion>
+  <Accordion title="Notification">
+    Fires when Claude Code emits a notification (e.g. when it needs user input). Use to bridge notifications to desktop or webhook systems.
+  </Accordion>
+  <Accordion title="UserPromptSubmit">
+    Fires when the user submits a prompt, before Claude processes it. Useful for logging, prompt augmentation, or pre-submission validation.
+  </Accordion>
+  <Accordion title="SessionStart">
+    Fires once when a new session begins. Use for setup tasks, welcome scripts, or environment validation.
+  </Accordion>
+  <Accordion title="SessionEnd">
+    Fires when the session ends. Use for teardown, summaries, or syncing session data.
+  </Accordion>
+  <Accordion title="Stop">
+    Fires when Claude stops (completes a turn). Useful for post-turn processing.
+  </Accordion>
+  <Accordion title="StopFailure">
+    Fires when Claude stops due to an error.
+  </Accordion>
+  <Accordion title="SubagentStart / SubagentStop">
+    Fire when a sub-agent (spawned by the main agent) starts or stops.
+  </Accordion>
+  <Accordion title="PreCompact / PostCompact">
+    Fire before and after context compaction. Use `PreCompact` to capture the full context before it is compressed; use `PostCompact` to run post-compaction setup.
+  </Accordion>
+  <Accordion title="PermissionRequest / PermissionDenied">
+    Fire when Claude requests a permission or when a permission is denied. Useful for audit logging.
+  </Accordion>
+  <Accordion title="Setup">
+    Fires once at startup, before `SessionStart`. Runs even in bare mode. Suitable for environment initialization.
+  </Accordion>
+  <Accordion title="InstructionsLoaded">
+    Fires after CLAUDE.md instructions have been loaded into the session context.
+  </Accordion>
+  <Accordion title="FileChanged">
+    Fires when a file is modified (e.g. from a Write or Edit tool call). The changed path is available via `$CLAUDE_FILE_PATHS`.
+  </Accordion>
+  <Accordion title="CwdChanged">
+    Fires when the working directory changes.
+  </Accordion>
+  <Accordion title="WorktreeCreate / WorktreeRemove">
+    Fire when a git worktree is created or removed.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Hook types
+
+### Command hook
+
+Runs a shell command. This is the most common hook type.
+
+```json
+{
+  "type": "command",
+  "command": "echo $CLAUDE_TOOL_NAME >> ~/.claude/tool-log.txt"
+}
+```
+
+<ParamField body="type" type="string" required>
+  Must be `"command"`.
+</ParamField>
+
+<ParamField body="command" type="string" required>
+  Shell command to execute. Supports environment variable expansion.
+</ParamField>
+
+<ParamField body="if" type="string">
+  Permission rule syntax filter applied before the hook runs (e.g. `"Bash(git *)"`, `"Write(*.ts)"`). Avoids spawning the hook process when the tool call does not match.
+</ParamField>
+
+<ParamField body="shell" type="string">
+  Shell interpreter: `"bash"` (uses your `$SHELL`, bash/zsh/sh) or `"powershell"` (uses `pwsh`). Defaults to `"bash"`.
+</ParamField>
+
+<ParamField body="timeout" type="number">
+  Timeout in seconds for this specific command. Overrides the global hook timeout.
+</ParamField>
+
+<ParamField body="statusMessage" type="string">
+  Custom message displayed in the spinner while the hook runs.
+</ParamField>
+
+<ParamField body="once" type="boolean">
+  When `true`, the hook runs once and is removed from the configuration after execution.
+</ParamField>
+
+<ParamField body="async" type="boolean">
+  When `true`, the hook runs in the background without blocking Claude Code.
+</ParamField>
+
+<ParamField body="asyncRewake" type="boolean">
+  When `true`, the hook runs in the background and wakes the model if it exits with code `2` (indicating a blocking error). Implies `async: true`.
+</ParamField>
+
+---
+
+### Prompt hook
+
+Evaluates an LLM prompt. Use this to delegate verification or enrichment to a model without spawning a sub-agent.
+
+```json
+{
+  "type": "prompt",
+  "prompt": "Review the tool output and report any issues: $ARGUMENTS"
+}
+```
+
+<ParamField body="type" type="string" required>
+  Must be `"prompt"`.
+</ParamField>
+
+<ParamField body="prompt" type="string" required>
+  The prompt to send to the model. Use `$ARGUMENTS` as a placeholder for the hook input JSON.
+</ParamField>
+
+<ParamField body="if" type="string">
+  Permission rule syntax filter (same as command hook).
+</ParamField>
+
+<ParamField body="model" type="string">
+  Model to use for this prompt hook (e.g. `"claude-sonnet-4-6"`). Defaults to the configured small fast model.
+</ParamField>
+
+<ParamField body="timeout" type="number">
+  Timeout in seconds for this prompt evaluation.
+</ParamField>
+
+<ParamField body="statusMessage" type="string">
+  Custom status message shown in the spinner.
+</ParamField>
+
+<ParamField body="once" type="boolean">
+  When `true`, the hook runs once and is removed after execution.
+</ParamField>
+
+---
+
+### Agent hook
+
+Spawns a full sub-agent to verify or react to a tool call. More powerful than a prompt hook — the agent can itself call tools.
+
+```json
+{
+  "type": "agent",
+  "prompt": "Verify that unit tests ran and passed. Use $ARGUMENTS for input context.",
+  "timeout": 120
+}
+```
+
+<ParamField body="type" type="string" required>
+  Must be `"agent"`.
+</ParamField>
+
+<ParamField body="prompt" type="string" required>
+  Prompt describing what to verify or do. Use `$ARGUMENTS` as a placeholder for the hook input JSON.
+</ParamField>
+
+<ParamField body="if" type="string">
+  Permission rule syntax filter.
+</ParamField>
+
+<ParamField body="model" type="string">
+  Model to use for the agent. Defaults to Haiku.
+</ParamField>
+
+<ParamField body="timeout" type="number">
+  Timeout in seconds for agent execution. Default is 60.
+</ParamField>
+
+<ParamField body="statusMessage" type="string">
+  Custom status message shown in the spinner.
+</ParamField>
+
+<ParamField body="once" type="boolean">
+  When `true`, the hook runs once and is removed after execution.
+</ParamField>
+
+---
+
+### HTTP hook
+
+POSTs the hook input JSON to a URL. Useful for webhooks, audit logging services, and external integrations.
+
+```json
+{
+  "type": "http",
+  "url": "https://hooks.example.com/claude-events",
+  "headers": {
+    "Authorization": "Bearer $WEBHOOK_TOKEN"
+  },
+  "allowedEnvVars": ["WEBHOOK_TOKEN"]
+}
+```
+
+<ParamField body="type" type="string" required>
+  Must be `"http"`.
+</ParamField>
+
+<ParamField body="url" type="string" required>
+  URL to POST the hook input JSON to. Must be a valid URL.
+</ParamField>
+
+<ParamField body="if" type="string">
+  Permission rule syntax filter.
+</ParamField>
+
+<ParamField body="timeout" type="number">
+  Timeout in seconds for the HTTP request.
+</ParamField>
+
+<ParamField body="headers" type="object">
+  Additional headers to include in the request. Values may reference environment variables using `$VAR_NAME` or `${VAR_NAME}` syntax. Only variables listed in `allowedEnvVars` will be interpolated.
+</ParamField>
+
+<ParamField body="allowedEnvVars" type="array">
+  Explicit list of environment variable names that may be interpolated in header values. Variables not listed here are left as empty strings. **Required for env var interpolation to work.**
+</ParamField>
+
+<ParamField body="statusMessage" type="string">
+  Custom status message shown in the spinner.
+</ParamField>
+
+<ParamField body="once" type="boolean">
+  When `true`, the hook runs once and is removed after execution.
+</ParamField>
+
+---
+
+## Common patterns
+
+### Format on write
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "prettier --write $CLAUDE_FILE_PATHS",
+            "statusMessage": "Formatting..."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Run tests after edits
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write(src/**)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm test --passWithNoTests",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Audit log every tool call
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "https://audit.example.com/log",
+            "headers": {
+              "X-API-Key": "$AUDIT_KEY"
+            },
+            "allowedEnvVars": ["AUDIT_KEY"],
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Verify git commit is clean before stopping
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Check that all staged changes have been committed and the working tree is clean. Report any uncommitted files.",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Enterprise controls
+
+<AccordionGroup>
+  <Accordion title="disableAllHooks">
+    Set in any settings file to completely disable hook and `statusLine` execution.
+
+    ```json
+    { "disableAllHooks": true }
+    ```
+  </Accordion>
+  <Accordion title="allowManagedHooksOnly">
+    Set in managed settings to prevent user/project/local hooks from running. Only hooks defined in `managed-settings.json` will execute.
+  </Accordion>
+  <Accordion title="allowedHttpHookUrls">
+    Restrict which URLs HTTP hooks may POST to. Supports `*` as a wildcard. Arrays merge across settings sources.
+
+    ```json
+    { "allowedHttpHookUrls": ["https://hooks.example.com/*"] }
+    ```
+  </Accordion>
+  <Accordion title="httpHookAllowedEnvVars">
+    Restrict which environment variable names HTTP hooks may interpolate into headers. Arrays merge across settings sources.
+  </Accordion>
+</AccordionGroup>

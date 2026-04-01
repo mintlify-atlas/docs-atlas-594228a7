@@ -1,0 +1,198 @@
+---
+title: "Multi-Agent Architecture"
+description: "Spawn and coordinate sub-agents with AgentTool, coordinator mode, and agent swarms to parallelize complex tasks."
+---
+
+Claude Code supports a multi-agent architecture where a coordinator spawns workers that execute tasks concurrently. This lets you fan out research, implementation, and verification phases across independent agents.
+
+## How it works
+
+The core primitive is the `Agent` tool (internally `AGENT_TOOL_NAME = 'Agent'`, with a legacy alias `Task` for backward compatibility). When Claude invokes this tool, it launches a new agent with its own context, system prompt, and tool pool.
+
+```
+Coordinator
+  └── Agent({ description, prompt, subagent_type })
+        └── Worker runs with its own tools and returns results
+```
+
+Agents can run **synchronously** (blocking the parent until they finish) or **asynchronously** (returning immediately with an `async_launched` status so the coordinator can continue).
+
+## Input schema
+
+The `Agent` tool accepts the following parameters (defined in `tools/AgentTool/AgentTool.tsx`):
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `description` | `string` | Short (3–5 word) label shown in the UI |
+| `prompt` | `string` | Full task instructions for the agent |
+| `subagent_type` | `string` (optional) | Which agent definition to use (e.g. `worker`, `verification`) |
+| `model` | `sonnet \| opus \| haiku` (optional) | Override the agent's default model |
+| `run_in_background` | `boolean` (optional) | Run async; parent gets an `async_launched` result |
+| `name` | `string` (optional) | Addressable name for `SendMessage` routing |
+| `team_name` | `string` (optional) | Spawn as a teammate in an agent swarm |
+| `isolation` | `worktree` (optional) | Run in an isolated git worktree |
+| `cwd` | `string` (optional) | Override the working directory for this agent |
+
+## Coordinator mode
+
+Coordinator mode is activated by setting `CLAUDE_CODE_COORDINATOR_MODE=1`. The coordinator has a different system prompt and tool set, and **all agent spawns are forced async** — workers send `<task-notification>` XML back as user-role messages when they complete.
+
+```bash
+CLAUDE_CODE_COORDINATOR_MODE=1 claude
+```
+
+<Note>
+The coordinator never uses the `model` parameter on Agent calls. Workers get the default model for substantive tasks.
+</Note>
+
+The coordinator's system prompt (from `coordinator/coordinatorMode.ts`) gives it a structured workflow:
+
+<Steps>
+  <Step title="Research">
+    Spawn multiple read-only workers in parallel to investigate the codebase. Launch them simultaneously with multiple `Agent` tool calls in a single turn.
+  </Step>
+  <Step title="Synthesis">
+    Read findings and write a specific implementation spec — include file paths, line numbers, and exact changes. Never write "based on your findings."
+  </Step>
+  <Step title="Implementation">
+    Spawn workers to make the changes. Run one worker per file set to avoid conflicts.
+  </Step>
+  <Step title="Verification">
+    Spawn a fresh worker to prove the code works. Run tests, typechecks, and check edge cases independently.
+  </Step>
+</Steps>
+
+### Task notifications
+
+When a background agent completes, the coordinator receives a `<task-notification>` message:
+
+```xml
+<task-notification>
+  <task-id>agent-a1b2c3</task-id>
+  <status>completed</status>
+  <summary>Agent "Fix auth bug" completed</summary>
+  <result>Fixed null pointer in src/auth/validate.ts:42...</result>
+  <usage>
+    <total_tokens>4200</total_tokens>
+    <tool_uses>12</tool_uses>
+    <duration_ms>18400</duration_ms>
+  </usage>
+</task-notification>
+```
+
+Use the `task-id` to continue the same worker with `SendMessage`:
+
+```
+SendMessage({ to: "agent-a1b2c3", message: "Run the tests and commit." })
+```
+
+## Built-in agent types
+
+Defined in `tools/AgentTool/builtInAgents.ts`:
+
+<CardGroup cols={2}>
+  <Card title="general-purpose" icon="robot">
+    Default agent used when no `subagent_type` is specified. Runs with the full tool pool.
+  </Card>
+  <Card title="worker" icon="wrench">
+    Available in coordinator mode. Gets access to Bash, Read, Edit, and MCP tools. Use `subagent_type: "worker"` when operating as a coordinator.
+  </Card>
+  <Card title="Explore" icon="magnifying-glass">
+    One-shot research agent. Investigates and reports findings without modifying files.
+  </Card>
+  <Card title="Plan" icon="list-check">
+    One-shot planning agent. Creates implementation plans from research output.
+  </Card>
+  <Card title="verification" icon="circle-check">
+    Runs tests and typechecks to verify changes. Use `subagent_type: "verification"`.
+  </Card>
+  <Card title="statusline-setup" icon="terminal">
+    Sets up shell statusline integrations. Internal use.
+  </Card>
+</CardGroup>
+
+<Note>
+`Explore` and `Plan` are one-shot agents — the coordinator never sends follow-up `SendMessage` calls to them. This saves ~135 tokens per run by omitting the `agentId`/`SendMessage`/usage trailer (see `constants.ts:ONE_SHOT_BUILTIN_AGENT_TYPES`).
+</Note>
+
+## Async vs synchronous agents
+
+By default, agents run synchronously and block the parent turn. Set `run_in_background: true` (or define `background: true` in the agent definition) to run asynchronously.
+
+Async agents return immediately:
+
+```json
+{
+  "status": "async_launched",
+  "agentId": "agent-a1b2c3",
+  "description": "Investigate auth bug",
+  "prompt": "...",
+  "outputFile": "/tmp/claude/tasks/agent-a1b2c3/output.txt"
+}
+```
+
+The `outputFile` path can be read with the `Read` or `Bash` tools to poll progress before the notification arrives.
+
+<Tip>
+After 2 seconds, a background hint appears in the UI (controlled by `PROGRESS_THRESHOLD_MS = 2000` in `AgentTool.tsx`). The user can press the background button to detach the agent from the foreground.
+</Tip>
+
+## Worktree isolation
+
+Pass `isolation: "worktree"` to run an agent in a temporary git worktree. The worktree is created before the agent starts and cleaned up afterward — unless the agent made changes, in which case it is preserved at the reported `worktreePath`.
+
+```
+Agent({
+  description: "Implement feature X",
+  prompt: "...",
+  isolation: "worktree"
+})
+```
+
+Internally, the slug is `agent-{first-8-chars-of-agentId}` and `createAgentWorktree` handles the git plumbing (`utils/worktree.ts`).
+
+## Agent swarms (TeamCreate/TeamDelete)
+
+<Warning>
+Agent Teams requires a plan that supports multi-agent swarms. Attempting to use `team_name` without access throws: `"Agent Teams is not yet available on your plan."`
+</Warning>
+
+When `team_name` and `name` are both provided, the Agent tool routes to `spawnTeammate()` instead of a regular sub-agent. Teammates are launched in separate tmux panes and appear in the team roster.
+
+```
+Agent({
+  description: "Frontend agent",
+  prompt: "...",
+  name: "frontend",
+  team_name: "my-team",
+  subagent_type: "worker"
+})
+```
+
+The teammate is addressable by name via `SendMessage({ to: "frontend", message: "..." })`.
+
+**Constraints:**
+- Teammates cannot spawn other teammates (the roster is flat)
+- In-process teammates cannot spawn background agents
+- Only one team lead manages the roster
+
+## Concurrency model
+
+The coordinator system prompt recommends:
+
+| Task type | Concurrency |
+|-----------|-------------|
+| Research (read-only) | Parallel — launch freely |
+| Implementation (writes) | Serial per file set |
+| Verification | Can run alongside implementation on different files |
+
+To launch agents in parallel, make multiple `Agent` tool calls in a single coordinator turn.
+
+## Environment variables
+
+| Variable | Effect |
+|----------|--------|
+| `CLAUDE_CODE_COORDINATOR_MODE=1` | Enable coordinator mode |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | Disable all background/async agents |
+| `CLAUDE_AUTO_BACKGROUND_TASKS=1` | Auto-background agents after 120 seconds |
+| `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` | Disable built-in agents in non-interactive (SDK) mode |

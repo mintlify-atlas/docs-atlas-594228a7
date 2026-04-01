@@ -1,0 +1,211 @@
+---
+title: "Plugins"
+description: "Install, manage, and create plugins to extend Claude Code with new skills, hooks, and MCP servers."
+---
+
+Plugins extend Claude Code with additional slash commands (skills), lifecycle hooks, and MCP servers. They are distributed through marketplaces and can be scoped to a user, project, or local session.
+
+## Plugin architecture
+
+A plugin is a directory containing a `.claude-plugin/plugin.json` manifest. At startup, Claude Code loads plugins from each configured marketplace, caches them locally, and merges their contributions into the active session.
+
+```
+my-plugin/
+  .claude-plugin/
+    plugin.json        # manifest (name, description, version)
+  skills/              # slash command definitions
+  hooks/               # lifecycle hook scripts
+```
+
+### Plugin IDs
+
+Every plugin is identified by `{name}@{marketplace}`. Built-in plugins that ship with Claude Code use the sentinel marketplace `builtin`: e.g. `my-plugin@builtin`. Marketplace plugins use the marketplace's registered name.
+
+### Scopes
+
+Plugins can be installed at three scopes (defined in `services/plugins/pluginOperations.ts`):
+
+| Scope | Settings file | Who sees it |
+|-------|--------------|-------------|
+| `user` | `~/.claude/settings.json` | You, across all projects |
+| `project` | `.claude/settings.json` | Everyone with the repo |
+| `local` | `.claude/settings.local.json` | You, in this project only |
+
+A `managed` scope exists for organization-provisioned plugins installed via `managed-settings.json`. These can be updated but not uninstalled by users.
+
+## The `/plugin` command
+
+Run `/plugin` to open the interactive plugin manager. Available subcommands:
+
+```bash
+/plugin                     # Open the plugin menu
+/plugin install <name>      # Install a plugin from a configured marketplace
+/plugin install <url>       # Add a marketplace by URL and browse its plugins
+/plugin uninstall <name>    # Uninstall a plugin
+/plugin enable <name>       # Enable a disabled plugin
+/plugin disable <name>      # Disable an enabled plugin
+/plugin manage              # Open the manage-plugins UI
+/plugin marketplace add <url>     # Add a marketplace
+/plugin marketplace remove <url>  # Remove a marketplace
+/plugin marketplace list          # List configured marketplaces
+/plugin validate [path]     # Validate a plugin directory
+```
+
+Plugin names can be bare (`my-plugin`) or fully qualified (`my-plugin@marketplace`). The `@marketplace` qualifier is required if a plugin with the same name exists in multiple marketplaces.
+
+## Installing plugins
+
+<Steps>
+  <Step title="Add a marketplace (if needed)">
+    If the plugin is not in a marketplace you have already configured, add it first:
+    ```bash
+    /plugin marketplace add https://example.com/marketplace.json
+    ```
+    Or add it via `/plugin install https://example.com/marketplace.json`.
+  </Step>
+  <Step title="Install the plugin">
+    ```bash
+    /plugin install my-plugin
+    # Install at project scope (shared with the team)
+    /plugin install my-plugin --scope project
+    ```
+    The CLI searches all configured marketplaces, resolves the plugin, writes the intent to the appropriate `settings.json`, and caches the plugin files locally.
+  </Step>
+  <Step title="Use the plugin">
+    Skills become available as slash commands immediately. MCP servers registered by the plugin connect on the next session start (or after `/reload-plugins`).
+  </Step>
+</Steps>
+
+### Installation order of operations
+
+From `pluginOperations.ts:installPluginOp`:
+
+1. Search materialized marketplaces for the plugin entry
+2. Write settings (declares intent — this is the atomic action)
+3. Cache plugin files and record the version hint
+
+If the marketplace has not been materialized yet (e.g. newly added), startup reconciliation handles it the next time Claude Code starts.
+
+## Managing plugins
+
+### Enable / disable
+
+Disabling a plugin keeps it installed but removes its contributions from the session:
+
+```bash
+/plugin disable my-plugin
+/plugin enable my-plugin
+
+# Scope-specific (override a project-enabled plugin just for you)
+/plugin disable my-plugin --scope local
+```
+
+### Uninstall
+
+```bash
+/plugin uninstall my-plugin
+# Specify scope if not auto-detected
+/plugin uninstall my-plugin --scope project
+```
+
+Uninstalling removes the plugin from `settings.json` and marks the cached version as orphaned. If this was the last scope using the plugin, stored options and secrets are also deleted (`deletePluginOptions`, `deletePluginDataDir`).
+
+<Warning>
+If other enabled plugins declare a dependency on the plugin you are uninstalling, a warning is displayed but the operation is not blocked. Load-time verification will demote the dependent plugins.
+</Warning>
+
+### Update
+
+```bash
+claude plugin update my-plugin
+claude plugin update my-plugin --scope project
+```
+
+Updates fetch the latest version from the marketplace, copy it to a new versioned cache directory, and update `installed_plugins_v2.json`. The running session is unaffected — changes take effect on restart.
+
+### Disable all
+
+```bash
+claude plugin disable-all
+```
+
+Iterates over all enabled plugins and disables each one, reporting any failures.
+
+## Built-in plugins
+
+Built-in plugins are registered at startup via `registerBuiltinPlugin()` (`plugins/builtinPlugins.ts`) and appear in a dedicated "Built-in" section of the `/plugin` UI. They do not live on disk — their `path` is the sentinel value `"builtin"`.
+
+```typescript
+// Built-in plugin IDs always end with @builtin
+const pluginId = `${name}@builtin`
+```
+
+Users can enable or disable built-in plugins; the preference is stored in `~/.claude/settings.json` under `enabledPlugins`. The `defaultEnabled` field on the definition controls the initial state.
+
+Built-in plugins can contribute:
+- **Skills** — slash commands available via the `Skill` tool
+- **Hooks** — lifecycle hooks (pre/post tool use, session start, etc.)
+- **MCP servers** — additional MCP server connections
+
+## Creating a plugin
+
+<Steps>
+  <Step title="Create the plugin directory">
+    ```bash
+    mkdir my-plugin
+    mkdir my-plugin/.claude-plugin
+    ```
+  </Step>
+  <Step title="Write the manifest">
+    ```json
+    // my-plugin/.claude-plugin/plugin.json
+    {
+      "name": "my-plugin",
+      "description": "Describe what this plugin does",
+      "version": "1.0.0"
+    }
+    ```
+  </Step>
+  <Step title="Add skills (optional)">
+    Skills are markdown files that define slash commands. Place them in a `skills/` directory inside the plugin. Each file becomes a `/skill-name` command.
+  </Step>
+  <Step title="Add hooks (optional)">
+    Hooks are executable scripts that run at lifecycle events. Reference them in your manifest under the `hooks` key.
+  </Step>
+  <Step title="Add MCP servers (optional)">
+    Declare MCP servers in `plugin.json` under `mcpServers`. Claude Code connects to them when the plugin is enabled.
+  </Step>
+  <Step title="Validate your plugin">
+    ```bash
+    /plugin validate ./my-plugin
+    ```
+    This checks the manifest schema, skill syntax, and hook configuration before publishing.
+  </Step>
+</Steps>
+
+## Plugin scoping and precedence
+
+When the same plugin is declared at multiple scopes, the most specific scope wins:
+
+```
+local > project > user > managed
+```
+
+`findPluginInSettings` in `pluginOperations.ts` searches `local` first, then `project`, then `user`. This lets you override a team-wide project-scoped plugin with a local-only preference without modifying the shared `settings.json`.
+
+## Organization policy
+
+Administrators can block specific plugins via managed settings. Blocked plugins cannot be installed or enabled:
+
+```
+Plugin "my-plugin" is blocked by your organization's policy and cannot be installed
+```
+
+The check runs in `isPluginBlockedByPolicy` (`utils/plugins/pluginPolicy.ts`) and is enforced during both install and enable operations.
+
+## Background installation
+
+On startup, `PluginInstallationManager.ts` reconciles declared marketplaces with the materialized state in the background. New marketplaces are cloned; changed sources are re-fetched. The REPL shows a spinner for each pending marketplace. After reconciliation:
+
+- **New installs** trigger an auto-refresh so the plugins are available immediately
+- **Updates only** set a `needsRefresh` flag and show a notification to run `/reload-plugins`

@@ -1,0 +1,95 @@
+---
+title: "MCP integration"
+description: "Connect Claude Code to external tools and data sources using the Model Context Protocol."
+---
+
+The Model Context Protocol (MCP) is an open standard that lets Claude Code connect to external servers that expose tools, resources, and prompts. Instead of being limited to built-in capabilities, Claude can call out to databases, APIs, search engines, or any other service you wire up as an MCP server.
+
+## What MCP is
+
+MCP defines a client-server architecture over a lightweight JSON-RPC protocol. Claude Code acts as the **MCP client**. Each MCP server you configure is an independent process or remote endpoint that advertises its own set of capabilities. When a task calls for it, Claude discovers and invokes those capabilities automatically.
+
+The protocol supports three primitives:
+
+<CardGroup cols={3}>
+  <Card title="Tools" icon="wrench">
+    Functions Claude can call during a conversation — run a query, call an API, execute a script.
+  </Card>
+  <Card title="Resources" icon="file">
+    Readable content the server exposes — files, database rows, documentation pages.
+  </Card>
+  <Card title="Prompts" icon="message-square">
+    Reusable prompt templates the server makes available for structured interactions.
+  </Card>
+</CardGroup>
+
+## How Claude Code uses MCP
+
+When Claude Code starts, it reads your MCP configuration and attempts to connect to every configured server. Successfully connected servers appear as available in the session. Claude considers all connected MCP tools alongside its built-in tools when deciding how to fulfill a request.
+
+The connection status of each server is tracked throughout the session. A server can be in one of these states:
+
+| State | Meaning |
+|-------|---------|
+| `connected` | Server is reachable and its tools are available |
+| `pending` | Connection is being established or retried |
+| `needs-auth` | Server requires OAuth authentication before use |
+| `failed` | Connection could not be established |
+| `disabled` | Server is configured but has been manually disabled |
+
+These states come directly from the `MCPServerConnection` type defined in `services/mcp/types.ts:221`.
+
+## MCP tools vs built-in tools
+
+Claude Code ships with a set of built-in tools for common coding tasks: reading and writing files, running shell commands, searching code, and so on. MCP tools extend this set without replacing it.
+
+<AccordionGroup>
+  <Accordion title="Built-in tools">
+    Built-in tools are compiled into Claude Code and always available. They cover the core software development workflow: file operations, shell execution, web search, and code navigation. You cannot remove or reconfigure them.
+  </Accordion>
+  <Accordion title="MCP tools">
+    MCP tools are provided by external servers you configure. They are loaded dynamically at startup and can be added, removed, or disabled without modifying Claude Code itself. Common uses include querying internal databases, calling authenticated APIs, accessing proprietary documentation, or running specialized scripts.
+  </Accordion>
+  <Accordion title="Tool name normalization">
+    MCP tool names are normalized to avoid conflicts. The original name from the server is preserved internally (as `originalToolName` on the `SerializedTool` type in `services/mcp/types.ts:232`), while the normalized name is what appears in the session. If you see a tool called `mcp__myserver__dotool`, the prefix `mcp__myserver__` identifies which server provided it.
+  </Accordion>
+</AccordionGroup>
+
+## Supported transport types
+
+Claude Code can connect to MCP servers over several transport mechanisms, defined in `services/mcp/types.ts:23`:
+
+| Transport | Value | Description |
+|-----------|-------|-------------|
+| Stdio | `stdio` | Spawns a local subprocess and communicates over stdin/stdout. The default for local tools. |
+| SSE | `sse` | Connects to a remote server using Server-Sent Events. Supports OAuth. |
+| HTTP | `http` | Connects to a remote server using the Streamable HTTP transport. Supports OAuth. |
+| WebSocket | `ws` | Connects to a remote server over a WebSocket connection. |
+
+<Note>
+  The `sse-ide`, `ws-ide`, and `sdk` transport types are internal to Claude Code and used by IDE extension integrations. You do not configure these manually.
+</Note>
+
+## Configuration scopes
+
+MCP server configurations are scoped, which controls where they are stored and who they apply to. The available scopes are defined in `services/mcp/types.ts:10`:
+
+| Scope | Storage location | Use case |
+|-------|-----------------|----------|
+| `local` | Project-local config file (gitignored) | Personal servers for a specific project |
+| `project` | `.mcp.json` in the project root | Shared servers committed to the repository |
+| `user` | Global user config (`~/.claude/`) | Personal servers across all projects |
+| `enterprise` | Managed config file | Org-wide servers deployed by administrators |
+
+When multiple scopes define a server with the same name, the scope closest to the project takes precedence.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Adding servers" icon="plus" href="/mcp/adding-servers">
+    Add stdio, SSE, and HTTP MCP servers to your configuration.
+  </Card>
+  <Card title="Managing servers" icon="settings" href="/mcp/managing-servers">
+    List, remove, enable, disable, and troubleshoot MCP servers.
+  </Card>
+</CardGroup>

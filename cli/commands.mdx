@@ -1,0 +1,626 @@
+---
+title: "CLI Commands"
+description: "All slash commands available in the Claude Code interactive REPL and their usage."
+---
+
+Slash commands are entered at the prompt during an interactive Claude Code session. Type `/` followed by the command name. Most commands open an interactive panel; some accept inline arguments.
+
+<Note>
+  Commands marked as "non-interactive only" or with specific flags require you to be outside of an active conversation, or to be running in `--print` mode.
+</Note>
+
+## Session management
+
+<AccordionGroup>
+  <Accordion title="/clear">
+    **Description:** Clear conversation history and free up context window space.
+
+    **Usage:**
+    ```bash
+    /clear
+    ```
+
+    Wipes the current conversation transcript. The session continues but with an empty history. Useful when context is nearly full and you want to start a fresh exchange without restarting the process.
+  </Accordion>
+
+  <Accordion title="/compact">
+    **Description:** Clear conversation history but keep a summary in context.
+
+    **Usage:**
+    ```bash
+    /compact
+    /compact <custom summarization instructions>
+    ```
+
+    Unlike `/clear`, `/compact` summarizes the conversation before discarding the full transcript. Pass optional instructions to control how the summary is written (e.g. `focus on the API design decisions`).
+  </Accordion>
+
+  <Accordion title="/resume">
+    **Description:** Resume a previous conversation.
+
+    **Usage:**
+    ```bash
+    /resume
+    /resume <session-id>
+    /resume <search-term>
+    ```
+
+    Opens an interactive picker to select from past sessions in the current directory. Provide a session UUID to jump directly, or a search term to pre-filter the list.
+  </Accordion>
+
+  <Accordion title="/branch">
+    **Description:** Create a branch of the current conversation at this point.
+
+    **Usage:**
+    ```bash
+    /branch
+    ```
+
+    Forks the conversation history at the current message so you can explore a different direction without losing the original thread.
+  </Accordion>
+
+  <Accordion title="/rewind">
+    **Description:** Restore the code and/or conversation to a previous point.
+
+    **Usage:**
+    ```bash
+    /rewind
+    ```
+
+    Opens a picker that lets you select an earlier user message to rewind to. Files modified after that point can optionally be restored to their prior state.
+  </Accordion>
+
+  <Accordion title="/rename">
+    **Description:** Rename the current conversation.
+
+    **Usage:**
+    ```bash
+    /rename <new name>
+    ```
+
+    Sets a display name for the session that appears in `/resume` and in the terminal title bar.
+  </Accordion>
+
+  <Accordion title="/tag">
+    **Description:** Toggle a searchable tag on the current session.
+
+    **Usage:**
+    ```bash
+    /tag <tag-name>
+    ```
+
+    Attaches or removes a tag that can be used to filter sessions in the resume picker.
+  </Accordion>
+
+  <Accordion title="/exit">
+    **Description:** Exit the Claude Code REPL.
+
+    **Usage:**
+    ```bash
+    /exit
+    ```
+
+    Closes the session cleanly.
+  </Accordion>
+</AccordionGroup>
+
+## Model and effort
+
+<AccordionGroup>
+  <Accordion title="/model">
+    **Description:** View or change the active model for the current session.
+
+    **Usage:**
+    ```bash
+    /model
+    /model <model-name>
+    /model default
+    ```
+
+    Run without arguments to open the interactive model picker. Pass a model name or alias (e.g. `sonnet`, `opus`, `claude-sonnet-4-6`) to set it directly. Pass `default` to revert to the configured default.
+
+    **Examples:**
+    ```bash
+    /model sonnet
+    /model claude-opus-4-6
+    /model default
+    ```
+  </Accordion>
+
+  <Accordion title="/effort">
+    **Description:** Set effort level for model usage.
+
+    **Usage:**
+    ```bash
+    /effort <level>
+    ```
+
+    Controls how much compute the model uses for reasoning. Accepted values: `low`, `medium`, `high`, `max`.
+
+    ```bash
+    /effort high
+    ```
+  </Accordion>
+
+  <Accordion title="/fast">
+    **Description:** Toggle fast mode on or off for the current session.
+
+    **Usage:**
+    ```bash
+    /fast
+    ```
+
+    Fast mode uses a lighter-weight configuration to reduce latency. Only available on supported models.
+  </Accordion>
+</AccordionGroup>
+
+## Memory and context
+
+<AccordionGroup>
+  <Accordion title="/memory">
+    **Description:** Edit Claude memory files.
+
+    **Usage:**
+    ```bash
+    /memory
+    ```
+
+    Opens a selector to choose which `CLAUDE.md` memory file to edit — global, project-level, or local. The selected file opens in your `$EDITOR` or `$VISUAL` editor.
+  </Accordion>
+
+  <Accordion title="/context">
+    **Description:** Visualize current context usage as a colored grid.
+
+    **Usage:**
+    ```bash
+    /context
+    ```
+
+    Renders a heatmap of the context window, showing how much space is occupied by different message types.
+  </Accordion>
+
+  <Accordion title="/files">
+    **Description:** List all files currently in context.
+
+    **Usage:**
+    ```bash
+    /files
+    ```
+
+    Displays every file that has been read or written during the current session.
+  </Accordion>
+
+  <Accordion title="/add-dir">
+    **Description:** Add a new working directory to the session.
+
+    **Usage:**
+    ```bash
+    /add-dir <path>
+    ```
+
+    Grants Claude tool access to an additional directory beyond the initial working directory.
+  </Accordion>
+
+  <Accordion title="/compact">
+    See [Session management → /compact](#compact).
+  </Accordion>
+</AccordionGroup>
+
+## Configuration
+
+<AccordionGroup>
+  <Accordion title="/config">
+    **Description:** Open the configuration panel.
+
+    **Usage:**
+    ```bash
+    /config
+    ```
+
+    Opens the interactive settings UI where you can adjust Claude Code preferences, including output style, verbose mode, and other options.
+  </Accordion>
+
+  <Accordion title="/hooks">
+    **Description:** View and configure hook settings for tool events.
+
+    **Usage:**
+    ```bash
+    /hooks
+    ```
+
+    Opens the hooks configuration menu, which shows all configured hooks grouped by tool event type (e.g. `PreToolUse`, `PostToolUse`).
+  </Accordion>
+
+  <Accordion title="/permissions">
+    **Description:** Manage allow and deny tool permission rules.
+
+    **Usage:**
+    ```bash
+    /permissions
+    ```
+
+    Opens the permission rule list where you can review, add, or remove rules that control which tools Claude can execute without prompting.
+  </Accordion>
+
+  <Accordion title="/keybindings">
+    **Description:** Open or create your keybindings configuration file.
+
+    **Usage:**
+    ```bash
+    /keybindings
+    ```
+
+    Opens your keybindings JSON file in `$EDITOR`. Creates the file if it does not exist.
+  </Accordion>
+
+  <Accordion title="/vim">
+    **Description:** Toggle between Vim and Normal editing modes.
+
+    **Usage:**
+    ```bash
+    /vim
+    ```
+
+    Switches the prompt input between Vim key bindings and the default normal mode.
+  </Accordion>
+</AccordionGroup>
+
+## MCP servers
+
+<AccordionGroup>
+  <Accordion title="/mcp">
+    **Description:** Manage MCP (Model Context Protocol) servers.
+
+    **Usage:**
+    ```bash
+    /mcp
+    /mcp enable [<server-name>]
+    /mcp disable [<server-name>]
+    /mcp reconnect <server-name>
+    ```
+
+    Run without arguments to open the MCP settings panel. Use subcommands to enable or disable servers by name, or reconnect to a server that has dropped.
+
+    **Examples:**
+    ```bash
+    # Open MCP settings UI
+    /mcp
+
+    # Enable all disabled MCP servers
+    /mcp enable
+
+    # Enable a specific server
+    /mcp enable my-server
+
+    # Disable a specific server
+    /mcp disable my-server
+
+    # Reconnect a specific server
+    /mcp reconnect my-server
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Agents and plugins
+
+<AccordionGroup>
+  <Accordion title="/agents">
+    **Description:** Manage agent configurations.
+
+    **Usage:**
+    ```bash
+    /agents
+    ```
+
+    Opens the agent management panel where you can view, enable, and configure subagent definitions.
+  </Accordion>
+
+  <Accordion title="/plugin">
+    **Description:** Manage Claude Code plugins.
+
+    **Usage:**
+    ```bash
+    /plugin
+    ```
+
+    Opens the plugin management interface for installing, updating, and removing plugins.
+  </Accordion>
+
+  <Accordion title="/reload-plugins">
+    **Description:** Activate pending plugin changes in the current session.
+
+    **Usage:**
+    ```bash
+    /reload-plugins
+    ```
+
+    Reloads all plugins without restarting Claude Code. Useful after installing or updating a plugin.
+  </Accordion>
+
+  <Accordion title="/skills">
+    **Description:** List available skills.
+
+    **Usage:**
+    ```bash
+    /skills
+    ```
+
+    Shows all loaded skills — from `~/.claude/skills/`, project-local `.claude/skills/`, plugins, and MCP.
+  </Accordion>
+</AccordionGroup>
+
+## Session information
+
+<AccordionGroup>
+  <Accordion title="/cost">
+    **Description:** Show the total cost and duration of the current session.
+
+    **Usage:**
+    ```bash
+    /cost
+    ```
+
+    Displays token usage and estimated API cost accumulated in the current session.
+  </Accordion>
+
+  <Accordion title="/usage">
+    **Description:** Show plan usage limits.
+
+    **Usage:**
+    ```bash
+    /usage
+    ```
+
+    Shows your current plan's usage allowance and how much you have consumed.
+  </Accordion>
+
+  <Accordion title="/stats">
+    **Description:** Show Claude Code usage statistics and activity.
+
+    **Usage:**
+    ```bash
+    /stats
+    ```
+
+    Displays aggregated usage statistics across sessions.
+  </Accordion>
+
+  <Accordion title="/status">
+    **Description:** Show Claude Code status including version, model, account, API connectivity, and tool statuses.
+
+    **Usage:**
+    ```bash
+    /status
+    ```
+
+    Useful for quickly verifying your environment is correctly configured.
+  </Accordion>
+
+  <Accordion title="/session">
+    **Description:** Show remote session URL and QR code.
+
+    **Usage:**
+    ```bash
+    /session
+    ```
+
+    Only visible when running in remote mode (`--remote`). Displays the URL and a terminal QR code to connect from a mobile device or browser.
+
+    <Note>This command is only available when Claude Code is started with `--remote`.</Note>
+  </Accordion>
+
+  <Accordion title="/diff">
+    **Description:** View uncommitted changes and per-turn diffs.
+
+    **Usage:**
+    ```bash
+    /diff
+    ```
+
+    Shows a unified diff of all uncommitted file changes made during the session, organized by conversation turn.
+  </Accordion>
+</AccordionGroup>
+
+## Output and display
+
+<AccordionGroup>
+  <Accordion title="/copy">
+    **Description:** Copy Claude's last response to clipboard.
+
+    **Usage:**
+    ```bash
+    /copy
+    /copy <N>
+    ```
+
+    Copies the most recent assistant message. Pass a number to copy the Nth-latest response (e.g. `/copy 2` copies the second-most-recent response).
+  </Accordion>
+
+  <Accordion title="/export">
+    **Description:** Export the current conversation to a file or clipboard.
+
+    **Usage:**
+    ```bash
+    /export
+    ```
+
+    Opens an export dialog to save the session transcript as Markdown or copy it to the clipboard.
+  </Accordion>
+
+  <Accordion title="/plan">
+    **Description:** Enable plan mode or view the current session plan.
+
+    **Usage:**
+    ```bash
+    /plan
+    ```
+
+    Toggles plan mode, which requires Claude to produce a step-by-step plan before executing changes.
+  </Accordion>
+
+  <Accordion title="/theme">
+    **Description:** Change the terminal theme.
+
+    **Usage:**
+    ```bash
+    /theme
+    ```
+
+    Opens a theme picker to switch between available color schemes.
+  </Accordion>
+
+  <Accordion title="/color">
+    **Description:** Set the prompt bar color for this session.
+
+    **Usage:**
+    ```bash
+    /color
+    ```
+
+    Opens a color selector for the input prompt highlight color.
+  </Accordion>
+</AccordionGroup>
+
+## Help and feedback
+
+<AccordionGroup>
+  <Accordion title="/help">
+    **Description:** Show help and available commands.
+
+    **Usage:**
+    ```bash
+    /help
+    ```
+
+    Lists all available commands with short descriptions.
+  </Accordion>
+
+  <Accordion title="/feedback">
+    **Description:** Submit feedback about Claude Code.
+
+    **Usage:**
+    ```bash
+    /feedback
+    ```
+
+    Opens a feedback submission flow to report bugs or share suggestions with Anthropic.
+  </Accordion>
+
+  <Accordion title="/doctor">
+    **Description:** Diagnose and verify your Claude Code installation and settings.
+
+    **Usage:**
+    ```bash
+    /doctor
+    ```
+
+    Runs a series of checks on your environment (API keys, MCP servers, tool availability) and reports any issues.
+  </Accordion>
+
+  <Accordion title="/release-notes">
+    **Description:** View release notes.
+
+    **Usage:**
+    ```bash
+    /release-notes
+    ```
+
+    Shows the changelog for the current and recent Claude Code versions.
+  </Accordion>
+
+  <Accordion title="/upgrade">
+    **Description:** Upgrade to Max for higher rate limits and more Opus.
+
+    **Usage:**
+    ```bash
+    /upgrade
+    ```
+
+    Opens the upgrade flow for Anthropic account subscribers.
+  </Accordion>
+</AccordionGroup>
+
+## Development tools
+
+<AccordionGroup>
+  <Accordion title="/ide">
+    **Description:** Manage IDE integrations and show status.
+
+    **Usage:**
+    ```bash
+    /ide
+    ```
+
+    Shows connected IDE extensions and lets you manage IDE integration settings.
+  </Accordion>
+
+  <Accordion title="/install-github-app">
+    **Description:** Set up Claude GitHub Actions for a repository.
+
+    **Usage:**
+    ```bash
+    /install-github-app
+    ```
+
+    Walks through installing the Claude GitHub App on a repository to enable automated PR reviews and issue responses.
+  </Accordion>
+
+  <Accordion title="/pr-comments">
+    **Description:** Get comments from a GitHub pull request.
+
+    **Usage:**
+    ```bash
+    /pr-comments
+    ```
+
+    Fetches review comments from a GitHub PR and surfaces them in the conversation context.
+  </Accordion>
+
+  <Accordion title="/btw">
+    **Description:** Ask a quick side question without interrupting the main conversation.
+
+    **Usage:**
+    ```bash
+    /btw <question>
+    ```
+
+    Sends a one-off question to the model without affecting the main conversation flow. The response is shown inline and then dismissed.
+  </Accordion>
+</AccordionGroup>
+
+## Privacy and account
+
+<AccordionGroup>
+  <Accordion title="/login">
+    **Description:** Sign in to your Anthropic account.
+
+    **Usage:**
+    ```bash
+    /login
+    ```
+
+    Only available when not using a third-party provider (Bedrock, Vertex). Opens the OAuth login flow.
+  </Accordion>
+
+  <Accordion title="/logout">
+    **Description:** Sign out from your Anthropic account.
+
+    **Usage:**
+    ```bash
+    /logout
+    ```
+
+    Clears stored credentials for the current Anthropic account.
+  </Accordion>
+
+  <Accordion title="/privacy-settings">
+    **Description:** View and update your privacy settings.
+
+    **Usage:**
+    ```bash
+    /privacy-settings
+    ```
+
+    Opens the privacy settings panel to control data collection and conversation logging preferences.
+  </Accordion>
+</AccordionGroup>

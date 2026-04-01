@@ -1,0 +1,118 @@
+---
+title: "Memory"
+description: "How Claude Code loads and uses CLAUDE.md files to remember persistent instructions across sessions."
+---
+
+Claude Code reads plain Markdown files called **memory files** to load persistent instructions at the start of every session. You write instructions once and Claude follows them automatically — no need to re-explain coding standards, architecture decisions, or workflow preferences every time.
+
+## Memory file types
+
+Memory files are loaded in the following order (lowest to highest priority):
+
+| Type | Location | Purpose |
+|------|----------|---------|
+| **Managed** | `/etc/claude-code/CLAUDE.md` | Organization-wide rules set by administrators |
+| **User** | `~/.claude/CLAUDE.md` | Your personal global instructions for all projects |
+| **Project** | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` | Team instructions checked into the repo |
+| **Local** | `CLAUDE.local.md` | Your private project instructions, not committed |
+
+Files loaded later (higher in the list above) have higher priority — Claude pays more attention to them.
+
+<Tip>
+Add `CLAUDE.local.md` to your `.gitignore` to keep personal preferences out of the shared repository.
+</Tip>
+
+## Project memory
+
+Place a `CLAUDE.md` at your project root (or `.claude/CLAUDE.md`) to document conventions Claude should always follow:
+
+```markdown CLAUDE.md
+# Project conventions
+
+## Code style
+- Use TypeScript strict mode
+- Prefer `const` over `let`
+- No `any` types — use `unknown` and narrow
+
+## Testing
+- Tests live in `src/__tests__/`
+- Use Vitest, not Jest
+- Every new function needs a unit test
+
+## Git
+- Commit messages: `type(scope): description`
+- Never commit directly to `main`
+```
+
+## Rules directory
+
+For larger projects, split instructions across multiple files in `.claude/rules/`:
+
+```
+.claude/
+  rules/
+    coding-standards.md
+    api-conventions.md
+    testing-guide.md
+```
+
+All `.md` files in that directory are loaded automatically.
+
+## User memory
+
+Your global user memory at `~/.claude/CLAUDE.md` applies to every project. Use it for personal preferences that shouldn't live in the repo:
+
+```markdown ~/.claude/CLAUDE.md
+- Always explain what you're about to do before making changes
+- Prefer verbose variable names
+- Ask before refactoring files I haven't mentioned
+```
+
+## The `@include` directive
+
+Memory files can include other files using `@` notation:
+
+```markdown CLAUDE.md
+# Main instructions
+
+@./docs/architecture.md
+@./docs/api-conventions.md
+
+## Additional notes
+...
+```
+
+Supported path formats:
+- `@path` — relative to the including file
+- `@./relative/path` — explicit relative
+- `@~/home/path` — from your home directory
+- `@/absolute/path` — absolute path
+
+Circular references are automatically prevented. Non-existent files are silently ignored.
+
+## Managing memory with `/memory`
+
+Use the `/memory` command inside a session to open your memory files in your editor:
+
+```bash
+> /memory
+```
+
+This opens the relevant `CLAUDE.md` file so you can add or update instructions without leaving the terminal.
+
+## What to put in memory files
+
+<AccordionGroup>
+  <Accordion title="Coding standards">
+    Language versions, formatting rules, naming conventions, patterns to avoid, preferred libraries — anything Claude should consistently apply across files.
+  </Accordion>
+  <Accordion title="Project architecture">
+    Directory structure, module boundaries, how the build system works, where generated files go, key abstractions and their purpose.
+  </Accordion>
+  <Accordion title="Workflow and process">
+    How to run tests, how to build, branch naming, PR process, how to deploy to staging — operational context Claude needs to work efficiently.
+  </Accordion>
+  <Accordion title="Things to avoid">
+    Explicit don'ts are often more useful than do's. List anti-patterns, deprecated APIs, files that should never be modified directly, and commands that require human review.
+  </Accordion>
+</AccordionGroup>

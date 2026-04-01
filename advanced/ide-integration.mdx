@@ -1,0 +1,149 @@
+---
+title: "IDE Integration"
+description: "Connect Claude Code to VS Code, Cursor, Windsurf, and JetBrains IDEs for inline diffs, file syncing, and auto-connect."
+---
+
+Claude Code integrates with popular IDEs via a local MCP (Model Context Protocol) connection. The IDE extension communicates with the CLI over SSE or WebSocket, enabling diff previews, file navigation, and diagnostics directly inside your editor.
+
+## Supported IDEs
+
+<CardGroup cols={2}>
+  <Card title="VS Code" icon="code">
+    Install the Claude Code extension from the VS Code marketplace. The CLI detects it via the running process and workspace folders.
+  </Card>
+  <Card title="Cursor" icon="cursor">
+    VS Code-based. Detected the same way as VS Code; opened with the `code` CLI command.
+  </Card>
+  <Card title="Windsurf" icon="wind">
+    VS Code-based. Detected alongside VS Code and Cursor; opened with the `code` CLI command.
+  </Card>
+  <Card title="JetBrains IDEs" icon="j">
+    IntelliJ, WebStorm, PyCharm, GoLand, and others. Requires the Claude Code JetBrains plugin. Install and restart your IDE.
+  </Card>
+</CardGroup>
+
+## The `/ide` command
+
+The `/ide` slash command manages your IDE connection from inside Claude Code. It is implemented in `commands/ide/ide.tsx`.
+
+```
+/ide              # Open the IDE selector
+/ide open         # Open the current project/worktree in the selected IDE
+```
+
+### Connecting to an IDE
+
+<Steps>
+  <Step title="Open the IDE selector">
+    Run `/ide`. Claude Code scans for running IDE processes with a connected extension or plugin.
+  </Step>
+  <Step title="Select your IDE">
+    A list of available IDEs is shown. IDEs whose workspace folders do not match the current working directory appear in a separate "unavailable" section with a note explaining the mismatch.
+  </Step>
+  <Step title="Connection is established">
+    The CLI connects over SSE (`sse-ide`) or WebSocket (`ws-ide`) depending on the URL scheme reported by the IDE. The MCP server is registered under the name `ide` in the dynamic MCP config.
+  </Step>
+</Steps>
+
+<Note>
+Only one Claude Code instance can be connected to VS Code at a time. A warning is shown when multiple VS Code instances are detected.
+</Note>
+
+### Opening a project
+
+Run `/ide open` to open the current directory (or the active worktree path) in your IDE:
+
+- **VS Code, Cursor, Windsurf**: uses the `code <path>` CLI command
+- **JetBrains**: prompts you to open manually with the path displayed
+
+If you are inside a git worktree (created by a `worktree` isolated agent), `/ide open` opens the worktree path, not the repo root.
+
+### Disconnecting
+
+Select "None" in the IDE selector. Claude Code closes the MCP transport and removes the `ide` client from the session state. If auto-connect is enabled you will be asked whether to disable it.
+
+## Auto-connect
+
+Auto-connect re-establishes the IDE connection automatically when Claude Code starts inside a supported terminal (e.g., VS Code's integrated terminal). It can be enabled from `/config` or with the `--ide` flag.
+
+```bash
+claude --ide          # Start with IDE auto-connect
+```
+
+Two dialogs control the auto-connect preference:
+- **`IdeAutoConnectDialog`** — shown when you select an IDE for the first time, asks if you want to enable auto-connect
+- **`IdeDisableAutoConnectDialog`** — shown when you select "None", asks if you want to disable auto-connect
+
+Both dialogs are rendered by `components/IdeAutoConnectDialog.tsx` and the preference is persisted to global config.
+
+## IDE detection internals
+
+Detection is handled by `utils/ide.ts` (`detectIDEs` / `detectRunningIDEs`). Each detected IDE is represented as a `DetectedIDEInfo`:
+
+```typescript
+type DetectedIDEInfo = {
+  name: string           // "VS Code", "Cursor", "WebStorm", …
+  port: number           // local port the extension listens on
+  url: string            // SSE or WebSocket URL
+  isValid: boolean       // workspace matches current cwd
+  workspaceFolders: string[]
+  authToken?: string
+  ideRunningInWindows?: boolean  // WSL path conversion needed
+}
+```
+
+`isValid` is `true` only when at least one of the IDE's open workspace folders is an ancestor of the current working directory. IDEs with `isValid: false` appear in the "unavailable" section of the selector with their workspace path(s) listed.
+
+### Extension installation
+
+If no IDE with the extension is detected but a supported IDE is running, Claude Code offers to install the extension automatically. When multiple supported IDEs are running, a selector is shown (`RunningIDESelector`). For a single IDE, installation begins immediately on mount.
+
+After installation:
+- **VS Code / Cursor / Windsurf**: extension is active immediately
+- **JetBrains**: a full IDE restart is required (`"Please restart your IDE completely for it to take effect"`)
+
+The JetBrains plugin page: `https://docs.claude.com/s/claude-code-jetbrains`
+
+## MCP connection details
+
+The IDE integration uses the `ide` named MCP server in the dynamic MCP config:
+
+```json
+{
+  "ide": {
+    "type": "sse-ide",
+    "url": "http://localhost:<port>/sse",
+    "ideName": "VS Code",
+    "authToken": "<token>",
+    "scope": "dynamic"
+  }
+}
+```
+
+WebSocket-based connections use `type: "ws-ide"` with a `ws://` URL. The MCP client exposes IDE-specific tools under the `mcp__ide__` namespace (e.g. `mcp__ide__getDiagnostics`, `mcp__ide__openFile`).
+
+The connection timeout is `IDE_CONNECTION_TIMEOUT_MS = 35000` ms — slightly longer than the standard 30-second MCP connection timeout — to handle slower IDE startups.
+
+## WSL support
+
+When running Claude Code in WSL with a Windows-hosted IDE (JetBrains or VS Code), `utils/ide.ts` uses `WindowsToWSLConverter` and `checkWSLDistroMatch` (`utils/idePathConversion.ts`) to translate Windows paths to their WSL equivalents. The `ideRunningInWindows` flag on `DetectedIDEInfo` enables this code path.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No IDEs detected">
+    Verify that the Claude Code extension or JetBrains plugin is installed and the IDE is running. For JetBrains, ensure you have restarted the IDE after installation. Run `/ide` and check the message — it will say either "No available IDEs detected" with a plugin install link, or list IDEs whose workspace doesn't match your cwd.
+  </Accordion>
+  <Accordion title="IDE shows as unavailable">
+    The IDE's open workspace folders do not include the directory you are running Claude Code from. Open the project folder in your IDE first, then reconnect with `/ide`.
+  </Accordion>
+  <Accordion title="Connection timed out">
+    The CLI could not reach the IDE extension within 35 seconds. Check that the extension is active (not disabled), the IDE process is responsive, and no firewall is blocking localhost connections.
+  </Accordion>
+  <Accordion title="Multiple VS Code instances">
+    Only one Claude Code session can connect to a single VS Code window at a time. If you see the warning, select the correct port from the list — each instance shows its workspace folders when multiple windows are open.
+  </Accordion>
+  <Accordion title="JetBrains: plugin not working after install">
+    The JetBrains plugin requires a full IDE restart (not just reload). Quit the IDE completely and reopen it. `utils/jetbrains.ts` caches the plugin-installed state; a fresh process is needed to re-detect it.
+  </Accordion>
+</AccordionGroup>

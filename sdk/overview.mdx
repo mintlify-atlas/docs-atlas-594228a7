@@ -1,0 +1,135 @@
+---
+title: "SDK overview"
+description: "Embed Claude Code's agent loop directly in your TypeScript or JavaScript application."
+---
+
+The Claude Code SDK lets you run the same agent loop that powers the CLI inside your own process. Instead of spawning the `claude` binary and scraping its output, you import a function, pass a prompt, and iterate over a typed stream of messages.
+
+## When to use the SDK vs the CLI
+
+<AccordionGroup>
+  <Accordion title="Use the SDK when…">
+    - You need to process Claude's output programmatically in the same process
+    - You want to define custom tools that run in-process without a separate MCP server
+    - You are building a long-running service that manages multiple sessions
+    - You need fine-grained control over permissions, model selection, or abort signals
+    - You want to access session history via `listSessions` or `getSessionMessages`
+  </Accordion>
+  <Accordion title="Use the CLI when…">
+    - You want a one-shot command in a shell script or CI pipeline
+    - You do not need to process structured output from individual messages
+    - You are prototyping and want the fastest path to a working agent
+  </Accordion>
+</AccordionGroup>
+
+## Installation
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @anthropic-ai/claude-code
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add @anthropic-ai/claude-code
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @anthropic-ai/claude-code
+    ```
+  </Tab>
+</Tabs>
+
+The SDK requires Node.js 18 or later. Set your API key before running:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+## Basic setup
+
+The primary entry point is `query()`. It accepts a prompt and returns an async generator that yields typed `SDKMessage` objects as the agent works through a task.
+
+```typescript
+import { query } from '@anthropic-ai/claude-code'
+
+const messages = query({
+  prompt: 'List the TypeScript files in this directory.',
+  options: {
+    model: 'claude-opus-4-5',
+    cwd: process.cwd(),
+  },
+})
+
+for await (const message of messages) {
+  if (message.type === 'assistant') {
+    for (const block of message.message.content) {
+      if (block.type === 'text') {
+        console.log(block.text)
+      }
+    }
+  }
+
+  if (message.type === 'result') {
+    console.log('Done. Cost:', message.total_cost_usd)
+    break
+  }
+}
+```
+
+## Message types
+
+Every value the generator yields is an `SDKMessage`. The most important subtypes are:
+
+| Type | When it appears |
+|------|----------------|
+| `system` (subtype `init`) | First message in every stream. Contains the model, tools, and MCP server list. |
+| `assistant` | Each assistant turn. The `message.content` array holds text, tool-use, and thinking blocks. |
+| `user` | Tool results returned to Claude after a tool call. |
+| `tool_progress` | Progress heartbeat emitted during long-running tool calls. |
+| `result` (subtype `success`) | Final message. Contains cost, usage, and the text result. |
+| `result` (subtype `error_*`) | Final message when the agent exits with an error (max turns, budget, etc.). |
+| `system` (subtype `api_retry`) | Emitted when an API call fails and will be retried. |
+
+<Note>
+The `stream_event` type carries raw `RawMessageStreamEvent` objects from the Anthropic SDK. You can use these for token-level streaming if you need sub-turn granularity.
+</Note>
+
+## What's in the SDK
+
+The SDK exports the following public API surface:
+
+| Export | Description |
+|--------|-------------|
+| `query()` | Core agent loop. Returns an async generator of `SDKMessage`. |
+| `tool()` | Define a custom in-process tool backed by a Zod schema. |
+| `createSdkMcpServer()` | Bundle custom tools into an in-process MCP server. |
+| `unstable_v2_createSession()` | V2 API: create a persistent multi-turn session. |
+| `unstable_v2_resumeSession()` | V2 API: resume an existing session by ID. |
+| `unstable_v2_prompt()` | V2 API: one-shot convenience wrapper. |
+| `listSessions()` | List session metadata across one project or all projects. |
+| `getSessionInfo()` | Read metadata for a single session. |
+| `getSessionMessages()` | Read the full message history from a session transcript. |
+| `renameSession()` | Rename a session. |
+| `tagSession()` | Tag a session (or clear its tag). |
+| `forkSession()` | Fork a session into a new branch at an optional message boundary. |
+| `AbortError` | Error class thrown when a query is aborted. |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="query()" icon="bolt" href="/sdk/query">
+    Full parameter reference for the core agent function.
+  </Card>
+  <Card title="Sessions V2" icon="layers" href="/sdk/sessions">
+    Persistent multi-turn sessions and session management utilities.
+  </Card>
+  <Card title="Custom tools" icon="wrench" href="/sdk/custom-tools">
+    Define in-process tools with Zod schemas and wire them up via MCP.
+  </Card>
+  <Card title="CLI flags" icon="terminal" href="/cli/flags">
+    CLI flags that mirror SDK options for shell-based workflows.
+  </Card>
+</CardGroup>

@@ -1,0 +1,369 @@
+---
+title: "Installation"
+description: "Install Claude Code on macOS, Linux, or Windows, and set up authentication."
+---
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| Node.js | 18 or later |
+| npm | Bundled with Node.js 18+ |
+| Operating system | macOS, Linux, or Windows (WSL2 recommended) |
+
+Check your Node.js version:
+
+```bash
+node --version
+```
+
+<Note>
+Claude Code is distributed as an npm package and requires Node.js 18+. If you are on an older version, upgrade via your system package manager or a version manager (see below).
+</Note>
+
+## Install Claude Code
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Verify the installation:
+
+```bash
+claude --version
+```
+
+You should see output like `1.x.x (Claude Code)`.
+
+<Warning>
+Do not use `sudo npm install -g` on macOS or Linux. If you get a permissions error, fix your npm prefix instead (see the [npm docs](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally)).
+</Warning>
+
+## Platform-specific setup
+
+<Tabs>
+  <Tab title="macOS">
+    ### Install Node.js on macOS
+
+    **Option 1 — Homebrew (recommended)**
+
+    ```bash
+    brew install node
+    ```
+
+    **Option 2 — nvm (Node Version Manager)**
+
+    ```bash
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+    # Open a new terminal, then:
+    nvm install --lts
+    nvm use --lts
+    ```
+
+    **Option 3 — Official installer**
+
+    Download the macOS installer from [nodejs.org](https://nodejs.org).
+
+    ### Install Claude Code
+
+    ```bash
+    npm install -g @anthropic-ai/claude-code
+    ```
+
+    ### macOS keychain integration
+
+    On macOS, Claude Code stores OAuth tokens in the macOS Keychain via `security` CLI. This is automatic — no extra setup is required. If you see a keychain access prompt the first time you log in, click **Allow**.
+  </Tab>
+  <Tab title="Linux">
+    ### Install Node.js on Linux
+
+    **Option 1 — nvm (recommended)**
+
+    ```bash
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+    # Open a new terminal, then:
+    nvm install --lts
+    nvm use --lts
+    ```
+
+    **Option 2 — NodeSource apt repository**
+
+    ```bash
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    ```
+
+    **Option 3 — System package manager**
+
+    ```bash
+    # Debian / Ubuntu
+    sudo apt-get install nodejs npm
+
+    # Fedora / RHEL
+    sudo dnf install nodejs npm
+
+    # Arch Linux
+    sudo pacman -S nodejs npm
+    ```
+
+    <Warning>
+    Package manager versions of Node.js are often outdated. Use nvm or NodeSource to ensure you get Node.js 18+.
+    </Warning>
+
+    ### Install Claude Code
+
+    ```bash
+    npm install -g @anthropic-ai/claude-code
+    ```
+
+    ### Credential storage on Linux
+
+    Claude Code uses `libsecret` (GNOME Keyring / KWallet) for secure credential storage on Linux. Install the required package for your distro:
+
+    ```bash
+    # Debian / Ubuntu
+    sudo apt-get install libsecret-1-dev
+
+    # Fedora / RHEL
+    sudo dnf install libsecret-devel
+
+    # Arch Linux
+    sudo pacman -S libsecret
+    ```
+
+    If no keyring is available (headless servers), Claude Code falls back to storing tokens in `~/.claude/`.
+  </Tab>
+  <Tab title="Windows">
+    Claude Code runs on Windows via **WSL2** (Windows Subsystem for Linux). Running natively in the Windows Command Prompt or PowerShell is not supported.
+
+    ### Set up WSL2
+
+    <Steps>
+      <Step title="Enable WSL2">
+        Open PowerShell as Administrator and run:
+
+        ```powershell
+        wsl --install
+        ```
+
+        Restart your machine when prompted.
+      </Step>
+      <Step title="Open a WSL2 terminal">
+        Launch the Ubuntu app from the Start menu or open Windows Terminal and select the Ubuntu profile.
+      </Step>
+      <Step title="Install Node.js inside WSL2">
+        ```bash
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        # Open a new WSL2 terminal, then:
+        nvm install --lts
+        nvm use --lts
+        ```
+      </Step>
+      <Step title="Install Claude Code">
+        ```bash
+        npm install -g @anthropic-ai/claude-code
+        ```
+      </Step>
+    </Steps>
+
+    <Tip>
+    Windows Terminal with WSL2 gives the best experience. Install it from the Microsoft Store if you don't have it.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Authentication setup
+
+Claude Code supports multiple authentication methods. Choose the one that matches your access type.
+
+### Claude.ai OAuth (Pro / Team)
+
+If you have a Claude.ai Pro or Team subscription, you can authenticate with your account directly.
+
+<Steps>
+  <Step title="Run claude">
+    ```bash
+    claude
+    ```
+  </Step>
+  <Step title="Select Claude.ai login">
+    When prompted, choose **Claude.ai** (not API key). Claude Code will open a browser window.
+  </Step>
+  <Step title="Complete the OAuth flow">
+    Sign in to claude.ai and authorize Claude Code. Return to the terminal when done.
+  </Step>
+</Steps>
+
+Your OAuth tokens are stored in the system keychain and refreshed automatically. You will not need to re-authenticate unless you explicitly log out.
+
+To log out:
+
+```bash
+claude logout
+```
+
+### Anthropic API key
+
+If you access the API directly through [console.anthropic.com](https://console.anthropic.com), use an API key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+claude
+```
+
+To persist the key across sessions, add the export line to your shell profile:
+
+<CodeGroup>
+
+```bash ~/.bashrc or ~/.bash_profile
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```bash ~/.zshrc
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+</CodeGroup>
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc   # or source ~/.bashrc
+```
+
+<Warning>
+Do not commit your API key to version control. Use a secrets manager or a `.env` file excluded from git.
+</Warning>
+
+### Amazon Bedrock
+
+Access Claude through AWS Bedrock using your existing AWS credentials:
+
+```bash
+export CLAUDE_CODE_USE_BEDROCK=1
+claude
+```
+
+Claude Code uses the AWS SDK's standard credential chain — environment variables, `~/.aws/credentials`, IAM roles, and so on. Make sure the IAM identity you are using has permission to invoke the Claude model on Bedrock.
+
+Additional environment variables for Bedrock:
+
+| Variable | Purpose |
+|---|---|
+| `AWS_PROFILE` | Named AWS profile to use |
+| `AWS_REGION` | AWS region for Bedrock requests |
+| `CLAUDE_CODE_SKIP_BEDROCK_AUTH` | Skip credential prefetch (useful in some IAM role setups) |
+
+### Google Vertex AI
+
+Access Claude through GCP Vertex AI:
+
+```bash
+export CLAUDE_CODE_USE_VERTEX=1
+claude
+```
+
+Claude Code authenticates using Application Default Credentials (ADC). Set up ADC with:
+
+```bash
+gcloud auth application-default login
+```
+
+Additional environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `GOOGLE_CLOUD_PROJECT` | GCP project ID |
+| `CLAUDE_VERTEX_REGION` | Vertex AI region |
+| `CLAUDE_CODE_SKIP_VERTEX_AUTH` | Skip credential prefetch |
+
+## Enterprise and proxy configuration
+
+### Custom API base URL
+
+To route Claude Code through an API gateway or proxy, set:
+
+```bash
+export ANTHROPIC_BASE_URL=https://your-proxy.example.com
+```
+
+### Custom CA certificates
+
+If your network uses a corporate CA:
+
+```bash
+export NODE_EXTRA_CA_CERTS=/path/to/ca-bundle.crt
+```
+
+Or enable system CA roots:
+
+```bash
+NODE_OPTIONS="--use-system-ca" claude
+```
+
+### Managed settings
+
+Enterprise administrators can distribute a policy settings file to all users. Set the path via:
+
+```bash
+export CLAUDE_CODE_SETTINGS_FILE=/etc/claude-code/policy.json
+```
+
+See [Configuration](/configuration/settings) for the full settings schema.
+
+## Verify your installation
+
+Run the built-in diagnostics command to check for common problems:
+
+```bash
+claude doctor
+```
+
+This checks Node.js version, authentication state, keychain access, network connectivity, and MCP server configuration. Any issues are printed with suggested fixes.
+
+## Update Claude Code
+
+```bash
+npm update -g @anthropic-ai/claude-code
+```
+
+Claude Code also checks for updates automatically at startup and prompts you when a new version is available. To disable auto-updates:
+
+```bash
+export CLAUDE_CODE_DISABLE_AUTO_UPDATER=1
+```
+
+Or from within a session:
+
+```
+> /upgrade
+```
+
+## Uninstall
+
+```bash
+npm uninstall -g @anthropic-ai/claude-code
+```
+
+Configuration and session data are stored separately in `~/.claude/`. Remove that directory if you want to delete all local state:
+
+```bash
+rm -rf ~/.claude
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Walk through your first Claude Code session.
+  </Card>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Understand how Claude Code works under the hood.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration/settings">
+    Customize behavior with settings files and environment variables.
+  </Card>
+  <Card title="CLI flags" icon="terminal" href="/cli/flags">
+    Full reference for every command-line flag.
+  </Card>
+</CardGroup>

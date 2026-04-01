@@ -1,80 +1,183 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Go from zero to your first Claude Code session in under five minutes."
 ---
 
-## Get started in three steps
-
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through installing Claude Code, authenticating, and completing a real task on a codebase. By the end you will have Claude reading files, running commands, and editing code in your terminal.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Claude Code requires **Node.js 18 or later**. Run `node --version` to check. See [Installation](/installation) for full platform-specific requirements.
 </Note>
+
+## Step 1: Install Claude Code
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install -g @anthropic-ai/claude-code
+    ```
+  </Tab>
+  <Tab title="npx (no install)">
+    ```bash
+    npx @anthropic-ai/claude-code
+    ```
+  </Tab>
+</Tabs>
+
+Verify the installation:
+
+```bash
+claude --version
+```
+
+## Step 2: Authenticate
+
+Run `claude` for the first time in any directory. Claude Code will prompt you to authenticate.
+
+```bash
+claude
+```
+
+<Tabs>
+  <Tab title="Claude.ai (Pro / Team)">
+    Claude Code will open a browser window to sign in with your Claude.ai account. Complete the OAuth flow and return to the terminal. Your token is stored in the system keychain and refreshed automatically.
+
+    <Tip>
+    This method requires a Claude.ai Pro or Team subscription.
+    </Tip>
+  </Tab>
+  <Tab title="Anthropic API key">
+    Set your API key as an environment variable before launching Claude Code:
+
+    ```bash
+    export ANTHROPIC_API_KEY=sk-ant-...
+    claude
+    ```
+
+    To persist the key across sessions, add the export to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
+  </Tab>
+</Tabs>
+
+After authentication, Claude Code prints a welcome message and drops you into the interactive REPL.
+
+## Step 3: Open a project
+
+Navigate to any code project and launch Claude Code:
+
+```bash
+cd ~/my-project
+claude
+```
+
+Claude Code automatically picks up the current directory as the working directory. If a `CLAUDE.md` file exists at the project root, Claude reads it as background context before your first message.
+
+## Step 4: Ask Claude to do something
+
+Type a task in plain English and press Enter. Claude will plan the work, show you what it intends to do, and execute it step by step.
+
+Here are a few tasks to try:
+
+<CodeGroup>
+
+```text Explain the codebase
+Give me a high-level overview of this codebase. What does it do and how is it structured?
+```
+
+```text Fix a bug
+The tests in src/__tests__/parser.test.ts are failing with "unexpected token". Find the cause and fix it.
+```
+
+```text Add a feature
+Add a --dry-run flag to the CLI that prints what would happen without making any changes.
+```
+
+```text Refactor code
+Refactor the database connection logic in src/db/ to use a connection pool instead of opening a new connection per query.
+```
+
+</CodeGroup>
+
+Claude reads the relevant files, searches the codebase, and proposes changes. For file edits, it shows you a diff before writing anything.
+
+## Step 5: Review and continue
+
+After Claude completes a task, you can:
+
+- **Ask follow-up questions** — Claude retains full context from the current session.
+- **Request changes** — Tell Claude what to adjust and it will iterate.
+- **Run `/status`** — Check context window usage and which model is active.
+- **Run `/cost`** — See token usage and estimated cost for the session.
+
+```
+> /status
+```
+
+## Common workflows
+
+### Continue the most recent session
+
+If you close the terminal and come back later, resume the last session in your project:
+
+```bash
+claude --continue
+```
+
+### Run a one-shot task without the REPL
+
+Use `--print` (or `-p`) to run Claude non-interactively and get output on stdout:
+
+```bash
+claude --print "What does the authenticate() function do?"
+```
+
+This is useful in scripts and CI pipelines. The workspace trust dialog is skipped in `--print` mode — only use it in trusted directories.
+
+### Initialize project memory
+
+Ask Claude to generate a `CLAUDE.md` file that captures important context about your project:
+
+```bash
+claude
+> /init
+```
+
+Claude reads the project and writes a `CLAUDE.md` to the root. On future sessions it reads this file automatically.
+
+### Switch models
+
+```bash
+claude --model sonnet
+# or interactively:
+> /model
+```
+
+Pass a full model name (`claude-sonnet-4-6`) or an alias (`sonnet`, `opus`).
+
+## Key keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Enter` | Send message |
+| `Shift+Enter` | Insert a newline without sending |
+| `Ctrl+C` | Interrupt the current operation |
+| `Ctrl+L` | Clear the terminal |
+| `Up` / `Down` | Navigate message history |
+| `Ctrl+R` | Search message history |
+| `Esc` | Cancel the current input |
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Full install guide for macOS, Linux, and Windows, including Node version managers and enterprise auth options.
+  </Card>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Conceptual overview of how Claude Code works — tools, sessions, permissions, and auth.
+  </Card>
+  <Card title="Sessions" icon="clock-rotate-left" href="/concepts/sessions">
+    Learn how to resume, compact, and manage conversation sessions.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration/settings">
+    Customize Claude Code behavior with settings files and environment variables.
+  </Card>
+</CardGroup>

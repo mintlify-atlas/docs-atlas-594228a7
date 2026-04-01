@@ -1,0 +1,112 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Claude Code",
+  "projectDescription": "An AI-powered CLI coding assistant that integrates Claude directly into your terminal for autonomous code editing, multi-agent task execution, and deep IDE integration.",
+  "theme": "luma",
+  "primaryColor": "#CC785C",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/sessions",
+              "concepts/tools",
+              "concepts/permissions",
+              "concepts/memory"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/settings",
+              "configuration/model",
+              "configuration/hooks",
+              "configuration/skills"
+            ]
+          },
+          {
+            "group": "MCP Integration",
+            "pages": [
+              "mcp/overview",
+              "mcp/adding-servers",
+              "mcp/managing-servers"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/multi-agent",
+              "advanced/ide-integration",
+              "advanced/plugins",
+              "advanced/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SDK Reference",
+        "groups": [
+          {
+            "group": "SDK",
+            "pages": [
+              "sdk/overview",
+              "sdk/query",
+              "sdk/sessions",
+              "sdk/custom-tools"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/commands",
+              "cli/flags"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "AI-powered coding assistant that runs directly in the terminal",
+    "Multi-agent and swarm support for parallel task execution",
+    "MCP (Model Context Protocol) server integration for extensibility",
+    "Hooks system for customizing behavior at tool execution lifecycle events",
+    "Skills system for reusable prompt workflows",
+    "Plugin architecture for extending functionality",
+    "IDE integration (VS Code, JetBrains, Cursor)",
+    "Session management with resume and compact capabilities",
+    "Voice input support",
+    "Permissions and trust system for safe code execution"
+  ],
+  "publicApiSurface": [
+    "query() — Run a single AI prompt and stream results",
+    "tool() — Define custom MCP tools for the SDK",
+    "createSdkMcpServer() — Create an in-process MCP server",
+    "unstable_v2_createSession() — Create a persistent multi-turn session",
+    "unstable_v2_resumeSession() — Resume an existing session by ID",
+    "unstable_v2_prompt() — One-shot convenience function",
+    "listSessions() — List sessions with metadata",
+    "getSessionInfo() — Get metadata for a single session",
+    "getSessionMessages() — Read conversation messages from a session",
+    "CLI: claude mcp — Manage MCP servers",
+    "CLI: claude config — View and edit configuration",
+    "CLI: claude memory — Manage memory files (CLAUDE.md)",
+    "CLI: claude hooks — Manage lifecycle hooks",
+    "CLI: claude permissions — Manage tool permissions",
+    "CLI: claude session — List and resume sessions",
+    "CLI: claude model — Change the active model"
+  ]
+}

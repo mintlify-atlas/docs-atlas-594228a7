@@ -1,0 +1,191 @@
+---
+title: "Managing MCP servers"
+description: "List, remove, enable, disable, and troubleshoot MCP servers in Claude Code."
+---
+
+After adding MCP servers, you manage them through the interactive `/mcp` command inside a session or through CLI subcommands outside one. This page covers the full management lifecycle.
+
+## Interactive server management
+
+Inside any Claude Code session, run `/mcp` to open the MCP settings panel. This panel shows all configured servers, their connection status, and lets you enable or disable servers for the current session.
+
+You can also use `/mcp` with arguments directly:
+
+```
+/mcp enable my-server        # Enable a specific server
+/mcp disable my-server       # Disable a specific server
+/mcp enable                  # Enable all disabled servers
+/mcp disable                 # Disable all enabled servers
+/mcp reconnect my-server     # Attempt to reconnect a failed server
+```
+
+These commands are handled by the `MCPToggle` component in `commands/mcp/mcp.tsx:12`. The enable/disable state persists within the session but does not modify your config files.
+
+## CLI subcommands
+
+Outside of a session, use the `claude mcp` subcommands to manage server configurations.
+
+### List all servers
+
+```bash
+claude mcp list
+```
+
+This prints every configured server across all scopes, along with its scope and transport type.
+
+### Get details for a specific server
+
+```bash
+claude mcp get <name>
+```
+
+Shows the full configuration for the named server, including which scope it comes from and its current settings.
+
+### Remove a server
+
+```bash
+claude mcp remove <name>
+```
+
+Removes the server from the `local` scope by default. Use `-s` to target a specific scope:
+
+```bash
+claude mcp remove -s project my-server
+claude mcp remove -s user my-server
+```
+
+Removal is implemented by `removeMcpConfig` in `services/mcp/config.ts:769`. The function throws an error if the server is not found in the specified scope, so you will get a clear message if you target the wrong scope.
+
+<Note>
+  You can only remove servers from `local`, `user`, and `project` scopes. Servers in `enterprise` or `dynamic` scopes are managed externally and cannot be removed via the CLI.
+</Note>
+
+## Connection states
+
+Each server connection is typed as `MCPServerConnection` in `services/mcp/types.ts:221`, which is a union of five states:
+
+<AccordionGroup>
+  <Accordion title="connected">
+    The server is reachable and its tools are available to Claude. The `ConnectedMCPServer` object includes the server's reported capabilities, version information, and any instructions the server provides.
+  </Accordion>
+  <Accordion title="pending">
+    Claude Code is actively attempting to connect or is waiting to retry after a failure. The `PendingMCPServer` type includes `reconnectAttempt` and `maxReconnectAttempts` fields that track retry progress.
+  </Accordion>
+  <Accordion title="needs-auth">
+    The server requires OAuth authentication before it can be used. Claude Code will prompt you to complete the OAuth flow. See [Authentication](#authentication) below.
+  </Accordion>
+  <Accordion title="failed">
+    The connection could not be established. The `FailedMCPServer` type includes an `error` string with the failure reason. Run `/mcp reconnect <name>` to retry, or check the troubleshooting section below.
+  </Accordion>
+  <Accordion title="disabled">
+    The server is configured but has been manually disabled for the current session via `/mcp disable`. Use `/mcp enable <name>` to re-enable it.
+  </Accordion>
+</AccordionGroup>
+
+## Authentication
+
+Remote MCP servers (HTTP and SSE transport) can require OAuth authentication. When Claude Code connects to such a server for the first time, it transitions to `needs-auth` state and prompts you to complete the flow.
+
+### OAuth client secrets
+
+Client secrets are stored in the system keychain rather than in config files. If you added a server with `--client-secret`, the secret was saved at add time. You can update it by removing and re-adding the server.
+
+### OAuth callback port
+
+Some servers require a pre-registered redirect URI. Use `--callback-port` when adding the server to fix the local callback port:
+
+```bash
+claude mcp add --transport http \
+  --client-id my-client-id \
+  --client-secret \
+  --callback-port 8085 \
+  my-server https://api.example.com/mcp
+```
+
+This stores `callbackPort: 8085` in the `oauth` block of the server config (see `McpOAuthConfigSchema` in `services/mcp/types.ts:43`).
+
+## Project-scoped servers and `.mcp.json`
+
+When you add a server with `--scope project`, it is written to `.mcp.json` in your current working directory. This file is designed to be committed to version control so every team member gets the same servers automatically.
+
+The file format is:
+
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@company/postgres-mcp"],
+      "env": {
+        "DATABASE_URL": "$DATABASE_URL"
+      }
+    },
+    "sentry": {
+      "type": "http",
+      "url": "https://mcp.sentry.dev/mcp"
+    }
+  }
+}
+```
+
+<Tip>
+  Use environment variable references like `$DATABASE_URL` in `.mcp.json` so the file can be safely committed without secrets. Each developer sets the variable in their shell environment.
+</Tip>
+
+Claude Code traverses parent directories up to the filesystem root looking for `.mcp.json` files. Files closer to the current working directory take precedence over those in parent directories (`getMcpConfigsByScope` in `services/mcp/config.ts:888`).
+
+## Duplicate server deduplication
+
+If two configurations point to the same underlying server (same command array for stdio, or same URL for remote), Claude Code deduplicates them:
+
+- A manually configured server always wins over a plugin-provided or claude.ai connector server with the same signature.
+- Among plugin-provided servers, the first-loaded one wins.
+- Suppressed duplicates are logged at debug level.
+
+The dedup logic lives in `dedupPluginMcpServers` and `dedupClaudeAiMcpServers` in `services/mcp/config.ts:223`.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Server shows as failed at startup">
+    Check that the command or URL is correct. For stdio servers, verify the executable is on your `PATH`:
+
+    ```bash
+    which npx
+    npx --version
+    ```
+
+    For remote servers, confirm the endpoint is reachable:
+
+    ```bash
+    curl -I https://your-mcp-server.example.com/mcp
+    ```
+
+    Use `/mcp reconnect <name>` inside a session to retry without restarting Claude Code.
+  </Accordion>
+  <Accordion title="Environment variables not expanding">
+    Variables in your config must be set in the environment where you launch `claude`. Add them to your shell profile or `.env` file and restart the terminal.
+
+    If a variable is missing at startup, Claude Code logs a warning listing the unresolved variable names. Check your debug logs for lines referencing `missingVars`.
+  </Accordion>
+  <Accordion title="Tools from a server are not appearing">
+    Confirm the server is in `connected` state via `/mcp`. If it is connected but tools are missing, the server may not have advertised any tools (it may only provide resources or prompts). Check the server's own documentation.
+
+    Also check that the server is not `disabled` — run `/mcp enable <name>` to re-enable it.
+  </Accordion>
+  <Accordion title="'Server already exists' error when adding">
+    Each server name must be unique within a scope. If you get this error, either pick a different name or remove the existing entry first:
+
+    ```bash
+    claude mcp remove -s local my-server
+    claude mcp add my-server -- npx my-mcp-server
+    ```
+  </Accordion>
+  <Accordion title="'Enterprise MCP configuration is active' error">
+    When an enterprise-managed MCP config exists, it takes exclusive control and you cannot add or remove servers via the CLI. Contact your administrator to adjust the managed configuration.
+  </Accordion>
+  <Accordion title="Server blocked by enterprise policy">
+    Your organization's policy may restrict which servers can run. The error message will indicate whether the server is on a denylist or not on an allowlist. Contact your administrator to request an exception.
+  </Accordion>
+</AccordionGroup>

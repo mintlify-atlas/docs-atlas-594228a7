@@ -1,0 +1,220 @@
+---
+title: "Troubleshooting"
+description: "Diagnose installation issues, debug mode, logging, and known limitations with the /doctor command."
+---
+
+## The `/doctor` command
+
+`/doctor` runs a comprehensive self-diagnosis of your Claude Code installation. It is implemented as a React component (`screens/Doctor.tsx`) invoked by `commands/doctor/doctor.tsx`.
+
+```bash
+/doctor
+```
+
+The doctor collects a `DiagnosticInfo` object (defined in `utils/doctorDiagnostic.ts`):
+
+```typescript
+type DiagnosticInfo = {
+  installationType: 'npm-global' | 'npm-local' | 'native' | 'package-manager' | 'development' | 'unknown'
+  version: string
+  installationPath: string
+  invokedBinary: string
+  configInstallMethod: InstallMethod | 'not set'
+  autoUpdates: string
+  hasUpdatePermissions: boolean | null
+  multipleInstallations: Array<{ type: string; path: string }>
+  warnings: Array<{ issue: string; fix: string }>
+  recommendation?: string
+  packageManager?: string
+  ripgrepStatus: {
+    working: boolean
+    mode: 'system' | 'builtin' | 'embedded'
+    systemPath: string | null
+  }
+}
+```
+
+Each `warnings` entry includes both the detected `issue` and a concrete `fix` string you can run immediately.
+
+## Installation types
+
+The doctor detects your installation method and tailors its checks accordingly:
+
+| Type | Detection method |
+|------|-----------------|
+| `native` | Binary in `~/.local/bin/claude`; bundled mode active |
+| `package-manager` | Bundled mode + Homebrew, winget, mise, asdf, pacman, deb, rpm, or apk detected |
+| `npm-global` | Script path contains standard npm global paths or `npm config get prefix` |
+| `npm-local` | Running from `~/.claude/local/` (local install) |
+| `development` | `NODE_ENV=development` |
+| `unknown` | None of the above match |
+
+## Common warnings and fixes
+
+<AccordionGroup>
+  <Accordion title="Native installation not in PATH">
+    **Issue**: `~/.local/bin/claude` exists but `~/.local/bin` is not in `PATH`.
+
+    **Fix** (macOS/Linux):
+    ```bash
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
+    source ~/.zshrc
+    ```
+
+    **Fix** (Windows): System Properties → Environment Variables → Edit User PATH → add `%USERPROFILE%\.local\bin`.
+  </Accordion>
+
+  <Accordion title="Local installation not accessible">
+    **Issue**: Running from `~/.claude/local/` but `claude` is not in PATH and no valid alias exists.
+
+    **Fix**:
+    ```bash
+    alias claude="~/.claude/local/claude"
+    # Add the above to your shell config for persistence
+    ```
+    If an alias exists but points to an invalid target, update it to `~/.claude/local/claude`.
+  </Accordion>
+
+  <Accordion title="Config install method mismatch">
+    **Issue**: Running from a local installation but `config.installMethod` is not `'local'`, or running a native build but the method is wrong.
+
+    **Fix**:
+    ```bash
+    claude install   # Re-runs the installer and updates configuration
+    ```
+  </Accordion>
+
+  <Accordion title="Multiple installations detected">
+    The doctor lists all detected Claude Code installations (npm-global, npm-local, native). Having multiple copies can cause version skew and unexpected behaviour.
+
+    Consolidate to a single installation type. The recommended path is `claude install` (native), which places the binary at `~/.local/bin/claude`.
+  </Accordion>
+
+  <Accordion title="managed-settings.json strictPluginOnlyCustomization warning">
+    **Issue**: `strictPluginOnlyCustomization` has an invalid value or contains unrecognized surface names.
+
+    The schema silently drops unrecognized values (forwards-compatibility). Known surfaces are listed in the fix message. Either correct the value or acknowledge that this client is older than the managed-settings intended.
+  </Accordion>
+
+  <Accordion title="ripgrep not working">
+    Claude Code uses ripgrep for fast file search. The doctor reports the ripgrep status:
+
+    - `system`: using the system-installed `rg` binary
+    - `builtin`: using a bundled ripgrep binary
+    - `embedded`: using an embedded fallback
+
+    If `working: false`, file search performance is degraded. Install ripgrep via your system package manager:
+
+    ```bash
+    # macOS
+    brew install ripgrep
+    # Debian/Ubuntu
+    sudo apt install ripgrep
+    # Arch
+    sudo pacman -S ripgrep
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Debug mode
+
+Enable verbose debug logging by setting `CLAUDE_DEBUG=1`:
+
+```bash
+CLAUDE_DEBUG=1 claude
+```
+
+Debug output is written via `logForDebugging` (`utils/debug.ts`) and includes:
+
+- Agent lifecycle events (spawn, complete, fail, abort)
+- Worktree creation and cleanup
+- MCP server connection attempts
+- Tool permission checks
+- Session storage reads/writes
+
+<Note>
+Debug logs go to stderr. Redirect them to a file with `CLAUDE_DEBUG=1 claude 2>debug.log` to capture a full session trace.
+</Note>
+
+## Logging
+
+### Diagnostic logs (no PII)
+
+`logForDiagnosticsNoPII` writes structured logs that exclude personally identifiable information. These are used by the plugin installation manager and other background services.
+
+### Error logs
+
+`logError` (`utils/log.ts`) captures unhandled errors and writes them to the session log. Check the log directory:
+
+```bash
+ls ~/.claude/logs/
+```
+
+### Analytics events
+
+Claude Code emits analytics events (e.g. `tengu_agent_tool_selected`, `tengu_ext_ide_command`) via the analytics service (`services/analytics/index.ts`). These are disabled in offline mode or when `CLAUDE_CODE_DISABLE_TELEMETRY=1` is set.
+
+## Environment variables reference
+
+<Tabs>
+  <Tab title="Core">
+    | Variable | Effect |
+    |----------|--------|
+    | `CLAUDE_DEBUG=1` | Enable verbose debug logging to stderr |
+    | `CLAUDE_CODE_DISABLE_TELEMETRY=1` | Disable analytics event emission |
+    | `NODE_ENV=development` | Development mode — relaxes some checks |
+    | `DISABLE_INSTALLATION_CHECKS=1` | Skip PATH/install-method warning checks (used in HFI environments) |
+  </Tab>
+  <Tab title="Agents">
+    | Variable | Effect |
+    |----------|--------|
+    | `CLAUDE_CODE_COORDINATOR_MODE=1` | Enable coordinator multi-agent mode |
+    | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | Disable background/async agent spawning |
+    | `CLAUDE_AUTO_BACKGROUND_TASKS=1` | Auto-background agents after 120 s |
+    | `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` | Disable built-in agents in SDK (non-interactive) mode |
+    | `CLAUDE_CODE_SIMPLE=1` | Restrict coordinator workers to Bash, Read, Edit only |
+  </Tab>
+  <Tab title="IDE">
+    | Variable | Effect |
+    |----------|--------|
+    | `--ide` flag | Start with IDE auto-connect enabled |
+  </Tab>
+</Tabs>
+
+## Known limitations
+
+<AccordionGroup>
+  <Accordion title="One VS Code connection at a time">
+    Only one Claude Code instance can be connected to a single VS Code window simultaneously. If you open a second terminal with Claude Code and connect to the same VS Code port, the first connection is displaced. Use `/ide` to reconnect.
+  </Accordion>
+
+  <Accordion title="Teammate nesting is not supported">
+    Teammates (spawned via `Agent` with `team_name` + `name`) cannot themselves spawn other teammates. The team roster is flat. If a teammate needs to delegate work, it must spawn a regular sub-agent (omit the `name` parameter).
+  </Accordion>
+
+  <Accordion title="In-process teammates cannot spawn background agents">
+    Background agents have their own lifecycle. In-process teammates are bound to their parent process and cannot manage detached background tasks. Use `run_in_background=false` for synchronous sub-agents from in-process teammates.
+  </Accordion>
+
+  <Accordion title="Worktree isolation requires a git repository">
+    `isolation: "worktree"` calls `createAgentWorktree` which requires the working directory to be inside a git repository. Running in a non-git directory will cause the agent spawn to fail.
+  </Accordion>
+
+  <Accordion title="Plugin updates require a restart">
+    `updatePluginOp` updates the versioned cache and the `installed_plugins_v2.json` record on disk, but the running session is not refreshed. Restart Claude Code (or run `/reload-plugins` if available) after updating a plugin.
+  </Accordion>
+
+  <Accordion title="MCP servers from plugins connect on next session">
+    MCP servers declared by a newly installed plugin are only connected when Claude Code starts (or after a session reload). Skills are available immediately; the MCP connection is not.
+  </Accordion>
+
+  <Accordion title="Fork subagents cannot fork again">
+    The fork path creates a child agent that inherits the parent's message context and system prompt. Fork children have the `Agent` tool in their pool for cache-identical tool definitions, but invoking it for another fork is rejected: `"Fork is not available inside a forked worker. Complete your task directly using your tools."`.
+  </Accordion>
+</AccordionGroup>
+
+## Getting help
+
+- Press `ctrl+p` inside Claude Code to list available actions
+- Report issues at [https://github.com/anomalyco/opencode](https://github.com/anomalyco/opencode)
+- Run `/doctor` for an automated summary of your installation health before filing a bug report

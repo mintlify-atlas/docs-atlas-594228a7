@@ -1,0 +1,125 @@
+---
+title: "Sessions"
+description: "How Claude Code stores, resumes, and summarizes conversation history."
+---
+
+A **session** is the unit of conversation state in Claude Code. Every message you send, every tool call Claude makes, and every result it receives is recorded as part of the current session. This lets you resume work exactly where you left off, share context across invocations, and compact long conversations when the context window fills up.
+
+## How sessions are stored
+
+Each session is identified by a UUID and persisted on disk as a newline-delimited JSON log (`.jsonl`) in `~/.claude/projects/<project-slug>/`. The log file grows append-only: new entries are streamed to disk as they are produced, so the history survives unexpected exits.
+
+The storage layer is implemented in `utils/sessionStorage.ts`. The session ID is assigned at startup and carried in global state (`bootstrap/state.ts`). Related metadata — the working directory, the active permission mode, any agent-subagent relationships — is saved alongside each entry.
+
+```
+~/.claude/
+└── projects/
+    └── my-project/
+        └── <session-id>.jsonl   # append-only conversation log
+```
+
+<Note>
+Session persistence can be disabled with the `--no-session-persistence` flag (only valid with `--print` mode). In that mode nothing is written to disk and the session cannot be resumed later.
+</Note>
+
+## Resuming a session
+
+Pass `--resume` (or `-r`) to pick up where a previous session ended:
+
+```bash
+# Resume the most recent session in the current project
+claude --resume
+
+# Resume a specific session by ID
+claude --resume <session-id>
+```
+
+When a session is resumed, Claude Code:
+
+<Steps>
+  <Step title="Locate the log file">
+    The session log for the requested ID is read from `~/.claude/projects/<project-slug>/`.
+  </Step>
+  <Step title="Replay message history">
+    All persisted messages are loaded and replayed into the conversation context so Claude can see the full prior exchange.
+  </Step>
+  <Step title="Restore working state">
+    The working directory, permission mode, and any active agent definitions are restored to match the state at the end of the last session.
+  </Step>
+  <Step title="Continue the conversation">
+    Claude picks up as if the conversation never ended — you can ask follow-up questions or issue new tasks with full context intact.
+  </Step>
+</Steps>
+
+## Listing past sessions
+
+Use the `/session` command inside a Claude Code session to browse sessions, or use the `--resume` flag with no argument to open the interactive session picker:
+
+```bash
+# Open the interactive session picker
+claude --resume
+```
+
+From the SDK, use `listSessions()` to list sessions programmatically — see the [SDK Sessions](/sdk/sessions) reference.
+
+## Compact — summarizing the conversation
+
+As a session grows, it eventually approaches the model's context-window limit. The `/compact` command (implemented in `commands/compact/compact.ts`) replaces the full message history with a dense summary produced by a secondary model call, freeing context for further work.
+
+```
+/compact
+```
+
+You can also pass custom instructions to guide what the summary should emphasize:
+
+```
+/compact Focus on the database schema decisions and ignore the UI discussion.
+```
+
+<Tip>
+Claude Code also runs compaction automatically when context usage nears the limit. The threshold is shown in the status bar.
+</Tip>
+
+### What happens during compaction
+
+<Steps>
+  <Step title="Pre-compact hooks run">
+    Any configured `PreCompact` hooks execute first (see the hooks documentation). Hooks can inject additional instructions that are merged with any custom instructions you provided.
+  </Step>
+  <Step title="Microcompact pre-processing">
+    A lightweight pass removes redundant tool results and verbose output from the message list to reduce the payload sent to the summarization model.
+  </Step>
+  <Step title="Summarization model call">
+    The full message list is sent to a secondary Claude model with instructions to produce a compact but complete summary of everything that happened.
+  </Step>
+  <Step title="Context is replaced">
+    The conversation history is replaced by the summary. A `SystemCompactBoundary` marker is written so the UI can still show where compaction occurred.
+  </Step>
+  <Step title="Memory files are reloaded">
+    The `getMemoryFiles` cache is cleared so any updated `CLAUDE.md` files are re-read into the new context.
+  </Step>
+</Steps>
+
+### Compaction result
+
+After a successful `/compact`, the original full transcript is still available for scrollback in the UI (`ctrl+o` to expand). Only the live context sent to the model is replaced.
+
+<Warning>
+Compaction is irreversible for the current session. If you need the exact verbatim prior messages, export or review them before running `/compact`.
+</Warning>
+
+## Session metadata
+
+Each log entry carries a rich set of metadata fields including:
+
+| Field | Description |
+|---|---|
+| `sessionId` | UUID identifying the session |
+| `agentId` | UUID identifying the specific agent within the session (main thread or subagent) |
+| `cwd` | Working directory at the time the entry was written |
+| `timestamp` | Unix timestamp in milliseconds |
+| `type` | Entry type: `user`, `assistant`, `system`, `tool_result`, etc. |
+
+## Concurrent sessions
+
+Multiple Claude Code instances can run simultaneously in different terminal windows. Each starts its own session with a unique ID. Session names (derived from the first user message) are tracked in a shared registry so the UI can distinguish them.
